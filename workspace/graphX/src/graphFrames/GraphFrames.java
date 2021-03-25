@@ -39,12 +39,8 @@ import org.apache.spark.sql.functions;
 import org.apache.spark.sql.catalyst.encoders.RowEncoder;
 import org.graphframes.GraphFrame;
 import org.graphframes.lib.PageRank;
-import org.graphframes.GraphFrame;
-
-import scala.reflect.ClassTag;
 import static org.apache.spark.sql.functions.col;
-import static org.apache.spark.sql.functions.*;;
-
+import static org.apache.spark.sql.functions.*;
 
 	public class GraphFrames {
 		//Turn nodes into String depending on their type
@@ -75,7 +71,6 @@ import static org.apache.spark.sql.functions.*;;
 		   
 		    Dataset<Row> dataframeRowEncoder = dataframe.map(new MapFunction<String, Row>() {
 		    		private static final long serialVersionUID = 445454;
-		    		@Override
 		    		public Row call(String arg0) throws Exception {
 		    		// TODO Auto-generated method stub
 		    		return RowFactory.create(arg0.split(",")[0], "1,2,3,4");
@@ -93,7 +88,8 @@ import static org.apache.spark.sql.functions.*;;
 		    	splitDataSet = splitDataSet.drop(col("line")).drop(col("point"));
 		    	//splitDataSet.show();
 		
-		   GraphFrame gf = new GraphFrame().fromEdges(splitDataSet);
+		   new GraphFrame();
+		GraphFrame gf = GraphFrame.fromEdges(splitDataSet);
 		   spark.stop();
 		}
 
