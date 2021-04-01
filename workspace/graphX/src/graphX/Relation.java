@@ -5,15 +5,15 @@ import java.io.Serializable;
 public class Relation extends Object implements Serializable {
 
 	private static final long serialVersionUID = 7086479564921920379L;
-	private Resource relationship;
-	private Resource context;
+	private Object relationship;
+	private Object context;
 	private String targetDataType;
 	
 	
 	public Relation(){
 	}
 	
-	public Relation(Resource predicate , Resource context, String targetDataType) {
+	public Relation(Object predicate , Object context, String targetDataType) {
 	    super();
 	    this.relationship = predicate;
 	    this.context = context;
@@ -21,7 +21,7 @@ public class Relation extends Object implements Serializable {
 	    
 	}
 	
-	public Resource getRelationship() {
+	public Object getRelationship() {
 	    return relationship;
 	}
 	
@@ -29,7 +29,7 @@ public class Relation extends Object implements Serializable {
 	    this.relationship = relationship;
 	  }
 	
-	public Resource getContext() {
+	public Object getContext() {
 		return context;
 	}
 	
