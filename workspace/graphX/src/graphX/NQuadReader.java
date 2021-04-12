@@ -14,10 +14,12 @@ import org.apache.jena.riot.Lang;
 import org.apache.jena.riot.RDFDataMgr;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.jena.sparql.core.Quad;
-import org.apache.jena.graph.Node;
 import org.apache.spark.storage.StorageLevel;
 	
 	public class NQuadReader {
@@ -33,67 +35,46 @@ import org.apache.spark.storage.StorageLevel;
 		
 		JavaRDD<Quad> javaRDD = getJavaRDD(path, jsc);
 		
-		List<Quad> quads = javaRDD.collect();
-		List<Edge<Relation>> quadEdges = new ArrayList<>();
-	    List<Object> verticesList = new ArrayList<>();
-	    long count = javaRDD.count();
-	
-	    for(int i = 0; i<count; i++) {
-	    	String targetDataType = "Resource";
-	    	//Subject
-	    	Node subject = quads.get(i).getSubject();
-		    Resource subjectRes =  new Resource();
-		    Resource predicate = new Resource();
-	 	    Resource context =  new Resource();
-		    
-		    subjectRes.setValue(subject.toString());
-	    	predicate.setValue(quads.get(i).getPredicate().toString());
-	    	context.setValue(quads.get(i).getGraph().toString());
-	    	
-	    	//Object
-	    	Node object = quads.get(i).getObject();
-    		Resource objectRes = new Resource();
-    		String objectLit = "";
-    		Object objectToAdd = null;
-	    	if(object.isLiteral()) {
-	    		targetDataType = object.getLiteralDatatype().getJavaClass().getSimpleName().toString();
-	    		objectLit = object.getLiteralValue().toString();
-	    		objectToAdd = objectLit;
-	    	} else {
-	    		objectRes.setValue(object.toString());
-	    		objectToAdd = objectRes;
-	    	}
-	    	
-	    	if(!verticesList.contains(subjectRes) && subjectRes.getValue() != "")
-	    		verticesList.add(subjectRes);
-	    	if(!verticesList.contains(objectRes) && objectRes.getValue() != "")
-	    		verticesList.add(objectRes);
-	    	if(!verticesList.contains(objectLit) && objectLit != "")
-	    		verticesList.add(objectLit);
+	    Set<Object> set = new LinkedHashSet<>();
+	    set.addAll(javaRDD.map(x -> new Resource(x.getSubject().toString())).collect());
+	    set.addAll(javaRDD.filter(x -> x.getObject().isLiteral()).map(x -> x.getObject().toString()).collect());
+	    set.addAll(javaRDD.filter(x -> !x.getObject().isLiteral()).map(x -> new Resource(x.getObject().toString())).collect());
 
-	    	Edge<Relation> quadEdge = null;
-	    	quadEdge = new Edge<Relation>(
-	    			verticesList.indexOf(subjectRes),
-	    			verticesList.indexOf(objectToAdd), 
-	    			new Relation(predicate ,context, targetDataType));
-	    	quadEdges.add(quadEdge);
-	    	}
-  
+	    List<Object> verticesList = new ArrayList<>(set);
+	    
+	    //all Objects that are Literals
+	    JavaRDD<Edge<Relation>> literalEdges = javaRDD.filter(x -> x.getObject().isLiteral())
+	    .map(x -> new Edge<Relation>(
+	    		verticesList.indexOf(new Resource(x.getSubject().toString())),
+	    		verticesList.indexOf(x.getObject().toString()), 
+    			new Relation(new Resource(x.getPredicate().toString()) ,new Resource(x.getGraph().toString()), x.getObject().getLiteralDatatype().getJavaClass().getSimpleName().toString())));
+	    
+	    //all Objects that are Resources
+	    JavaRDD<Edge<Relation>> resourceEdges = javaRDD.filter(x -> !x.getObject().isLiteral())
+	    .map(x -> new Edge<Relation>(
+	    		verticesList.indexOf(new Resource(x.getSubject().toString())),
+	    		verticesList.indexOf(new Resource(x.getObject().toString())), 
+    			new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()), "Resource")));
+	    
+	    JavaRDD<Edge<Relation>> quadEdgeRDD = literalEdges.union(resourceEdges);
+	    
+	    
 	    //add IDs to Vertices from their Index
-	    JavaRDD<Tuple2<Object, Object>> test2 = jsc.parallelize(verticesList).zipWithIndex().map(x -> new Tuple2<Object, Object>(x._2, x._1));
+	    JavaRDD<Tuple2<Object, Object>> vertices = jsc.parallelize(verticesList).zipWithIndex().map(x -> new Tuple2<Object, Object>(x._2, x._1));
 	    
 	    //create RDDs from lists
-	    JavaRDD<Edge<Relation>> quadEdgeRDD = jsc.parallelize(quadEdges);
+	    //JavaRDD<Edge<Relation>> quadEdgeRDD = jsc.parallelize(quadEdges);
 	   
         Graph<Object, Relation> quadGraph = Graph.apply(
-        		test2.rdd(),quadEdgeRDD.rdd(), "",StorageLevel.MEMORY_ONLY(),StorageLevel.MEMORY_ONLY(),objectTag,relationTag);       
+        		vertices.rdd(),quadEdgeRDD.rdd(), "",StorageLevel.MEMORY_ONLY(),StorageLevel.MEMORY_ONLY(),objectTag,relationTag);       
 
-        sliceDice(quadGraph, jsc, objectTag, relationTag, "Level_Importance_All", "Level_Aircraft_All", "Level_Location_All", "Level_Date_All").triplets().toJavaRDD().foreach(x -> System.out.println(x.dstAttr()));;
+        sliceDice(quadGraph, jsc, objectTag, relationTag, "Level_Importance_Package", "Level_Aircraft_All", "Level_Location_All", "Level_Date_Year").triplets().toJavaRDD().foreach(x -> System.out.println(x.dstAttr()));;
+
         jsc.close();	
 		
 		}
 		
-		
+
 		//get all Data as a Graph that are associated with modules that correspond to cells that have required dimension levels
 		private static Graph<Object, Relation> sliceDice(Graph<Object, Relation> graph, JavaSparkContext jsc,
 				ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String importanceLevel, String aircraftLevel, String locationLevel , String dateLevel) {						
@@ -166,25 +147,82 @@ import org.apache.spark.storage.StorageLevel;
 	        }
 	        return result;  
 		}
-
 		
 		//gets Cells that have a certain level of a specific dimension
 		private static List<Object> getCellsWithCertainLevel(Graph<Object, Relation> graph, ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String dimension, String level){
-	        List<Long> correctLevelVertices = graph.triplets().toJavaRDD()
-	        .filter(triplet -> ((Resource) triplet.attr().getRelationship()).getValue().contains("atLevel") 
-	        		&& triplet.dstAttr().toString().contains(level)).map(triplet -> triplet.srcId()).collect();
+	        ArrayList<String> lowerLevels = new ArrayList<>();
+	        lowerLevels.add(level);
+	        if(getLowerlevels(level) != null) {
+	        	lowerLevels.addAll(getLowerlevels(level));
+	        }
 	        
+			ArrayList<Long> aList = new ArrayList<>();
+			for (int i = 0; i < lowerLevels.size(); i++) {
+				int j = i;
+				aList.addAll(graph.triplets().toJavaRDD()
+				        .filter(triplet -> ((Resource) triplet.attr().getRelationship()).getValue().contains("atLevel")
+				        		&& triplet.dstAttr().toString().contains(lowerLevels.get(j)))
+		        		.map(triplet -> triplet.srcId()).collect());
+			}
+			System.out.println(aList.size());
+			
 	        List<EdgeTriplet<Object, Relation>> g = graph.triplets().toJavaRDD().filter(triplet -> ((Resource) triplet.attr().getRelationship()).getValue().contains(dimension)).collect();
 	        
     		List<Object> result = new ArrayList<>();
 	        for(int i = 0; i < g.size(); i++) {
-	        	if(correctLevelVertices.contains(g.get(i).dstId())) {
+	        	if(aList.contains(g.get(i).dstId())) {
 					result.add(g.get(i).srcId());
 	        	}
 	        }
 	        return result;
 		}
 		
+		//returns a list of all lower level of certain given level
+		private static ArrayList<String> getLowerlevels(String level) {
+			HashMap<String, List<String>> lowerLevelMap = new HashMap();
+			ArrayList<String> aircraftAll = new ArrayList<>();
+			 aircraftAll.add("Level_Aircraft_Model");
+			 aircraftAll.add("Level_Aircraft_Type");
+			lowerLevelMap.put("Level_Aircraft_All", aircraftAll);
+			ArrayList<String> aircraftModel = new ArrayList<>();
+			aircraftModel.add("Level_Aircraft_Type");
+			lowerLevelMap.put("Level_Aircraft_Model", aircraftModel);
+			
+			ArrayList<String> locationAll = new ArrayList<>();
+			locationAll.add("Level_Location_Region");
+			locationAll.add("Level_Location_Segment");
+			lowerLevelMap.put("Level_Location_All", locationAll);
+			ArrayList<String> locationRegion = new ArrayList<>();
+			locationRegion.add("Level_Location_Segment");
+			lowerLevelMap.put("Level_Location_Region", locationRegion);
+			
+			ArrayList<String> importanceAll = new ArrayList<>();
+			importanceAll.add("Level_Importance_Package");
+			importanceAll.add("Level_Importance_Importance");
+			lowerLevelMap.put("Level_Importance_All", importanceAll);
+			ArrayList<String> importancePackage = new ArrayList<>();
+			importancePackage.add("Level_Importance_Importance");
+			lowerLevelMap.put("Level_Importance_Package", importancePackage);
+
+			ArrayList<String> dateAll = new ArrayList<>();
+			dateAll.add("Level_Date_Year");
+			dateAll.add("Level_Date_Month");
+			dateAll.add("Level_Date_Day");
+			lowerLevelMap.put("Level_Date_All", dateAll);
+			ArrayList<String> dateYear = new ArrayList<>();
+			dateYear.add("Level_Date_Month");
+			dateYear.add("Level_Date_Day");
+			lowerLevelMap.put("Level_Date_Year", dateYear);
+			ArrayList<String> dateMonth = new ArrayList<>();
+			dateMonth.add("Level_Date_Day");
+			lowerLevelMap.put("Level_Date_Month", dateMonth);
+			if (lowerLevelMap.get(level) != null){
+				return (ArrayList<String>) lowerLevelMap.get(level);
+			}
+			return null;
+		}
+
+
 		//get JavaRDD from n-quad file
 		private static JavaRDD<Quad> getJavaRDD(String path, JavaSparkContext jsc) {
 				    
@@ -197,89 +235,5 @@ import org.apache.spark.storage.StorageLevel;
 				    javaRDD.persist(StorageLevel.MEMORY_AND_DISK());
 					return javaRDD;
 				}
-		
-		
-		
-		private static Graph<Object, Relation> getRollUpGraph(Graph<Object, Relation> graph, JavaSparkContext jsc, ClassTag<Object> objectTag, ClassTag<Relation> relationTag){
-			List<Edge<Relation>> rels = 
-					graph
-					.edges()
-			        .toJavaRDD()
-			        .filter(e -> ((Resource) e.attr().getRelationship()).getValue().contains("directlyRollsUpTo")).collect();			
-			
-			List<Tuple2<Object, Object>> rollupVertices = new ArrayList<>();
-			List<Object> vertices = new ArrayList<Object>();
-			//all sources and destinations of all rollup relationships
-			rels.forEach(x -> vertices.add(x.dstId()));
-			rels.forEach(x -> vertices.add(x.srcId()));
-			//filter vertices
-			graph.vertices().toJavaRDD().collect().forEach(v -> {
-				if(vertices.contains(v._1)) {
-					rollupVertices.add(v);
-				}
-			});
-			jsc.parallelize(rollupVertices);
-			jsc.parallelize(rels);
-	        Graph<Object, Relation> rollUpGraph = Graph.apply(
-	        		jsc.parallelize(rollupVertices).rdd(),jsc.parallelize(rels).rdd(), "",StorageLevel.MEMORY_ONLY(),StorageLevel.MEMORY_ONLY(),objectTag,relationTag);       
 
-			return rollUpGraph;
-		}
-		
-		private static Graph<Object, Relation> getDimensionGraph(Graph<Object, Relation> graph, JavaSparkContext jsc, ClassTag<Object> objectTag, ClassTag<Relation> relationTag){
-			List<Edge<Relation>> dims = 
-					graph
-					.edges()
-			        .toJavaRDD()
-			        .filter(e -> ((Resource) e.attr().getRelationship()).getValue().contains("hasImportance")
-			        		|| ((Resource) e.attr().getRelationship()).getValue().contains("hasAircraft")
-			        		|| ((Resource) e.attr().getRelationship()).getValue().contains("hasLocation")
-			        		|| ((Resource) e.attr().getRelationship()).getValue().contains("hasDate")).collect();			
-			
-			List<Tuple2<Object, Object>> dimVertices = new ArrayList<>();
-			List<Object> vertices = new ArrayList<Object>();
-			//all sources and destinations of all rollup relationships
-			dims.forEach(x -> vertices.add(x.dstId()));
-			dims.forEach(x -> vertices.add(x.srcId()));
-			//filter vertices
-			graph.vertices().toJavaRDD().collect().forEach(v -> {
-				if(vertices.contains(v._1)) {
-					dimVertices.add(v);
-				}
-			});
-			jsc.parallelize(dimVertices);
-			jsc.parallelize(dims);
-	        Graph<Object, Relation> dimGraph = Graph.apply(
-	        		jsc.parallelize(dimVertices).rdd(),jsc.parallelize(dims).rdd(), "",StorageLevel.MEMORY_ONLY(),StorageLevel.MEMORY_ONLY(),objectTag,relationTag);       
-
-			return dimGraph;
-		}
-		
-		private static Graph<Object, Relation> getGlobalGraph(Graph<Object, Relation> graph, JavaSparkContext jsc, ClassTag<Object> objectTag, ClassTag<Relation> relationTag){
-			List<Edge<Relation>> rels = 
-					graph
-					.edges()
-			        .toJavaRDD()
-			        .filter(e -> ((Resource) e.attr().getContext()).getValue().contains("global")).collect();			
-			
-			List<Tuple2<Object, Object>> globalVertices = new ArrayList<>();
-			List<Object> vertices = new ArrayList<Object>();
-			//all sources and destinations of all global relationships
-			rels.forEach(x -> vertices.add(x.dstId()));
-			rels.forEach(x -> vertices.add(x.srcId()));
-			//filter vertices
-			graph.vertices().toJavaRDD().collect().forEach(v -> {
-				if(vertices.contains(v._1)) {
-					globalVertices.add(v);
-				}
-			});
-			jsc.parallelize(globalVertices);
-			jsc.parallelize(rels);
-	        Graph<Object, Relation> globalGraph = Graph.apply(
-	        		jsc.parallelize(globalVertices).rdd(),jsc.parallelize(rels).rdd(), "",StorageLevel.MEMORY_ONLY(),StorageLevel.MEMORY_ONLY(),objectTag,relationTag);       
-
-			return globalGraph;
-		}
-		
-		
 }
