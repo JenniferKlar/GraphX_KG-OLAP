@@ -2,31 +2,34 @@ package graphX;
 
 import java.io.Serializable;
 
-public class Resource implements Serializable{
-	
+public class Resource implements Serializable {
+
 	private static final long serialVersionUID = -3510946479219060495L;
 	private String value;
 
 	public Resource() {
-		
+
 	}
+
 	public Resource(String value) {
 		this.value = value;
 	}
-	
+
 	public String getValue() {
 		return value;
 	}
+
 	public void setValue(String value) {
 		this.value = value;
 	}
-	
+
 	public int hashCode() {
 		final int prime = 31;
 		int result = 1;
 		result = prime * result + ((value == null) ? 0 : value.hashCode());
 		return result;
 	}
+
 	public boolean equals(Object obj) {
 		if (this == obj)
 			return true;
@@ -42,6 +45,7 @@ public class Resource implements Serializable{
 			return false;
 		return true;
 	}
+
 	public String toString() {
 		return this.value;
 	}

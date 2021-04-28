@@ -8,31 +8,30 @@ public class Relation extends Object implements Serializable {
 	private Object relationship;
 	private Object context;
 	private String targetDataType;
-	
-	
-	public Relation(){
+
+	public Relation() {
 	}
-	
-	public Relation(Object predicate , Object context, String targetDataType) {
-	    super();
-	    this.relationship = predicate;
-	    this.context = context;
-	    this.targetDataType = targetDataType;
-	    
+
+	public Relation(Object predicate, Object context, String targetDataType) {
+		super();
+		this.relationship = predicate;
+		this.context = context;
+		this.targetDataType = targetDataType;
+
 	}
-	
+
 	public Object getRelationship() {
-	    return relationship;
+		return relationship;
 	}
-	
+
 	public void setRelationship(Resource relationship) {
-	    this.relationship = relationship;
-	  }
-	
+		this.relationship = relationship;
+	}
+
 	public Object getContext() {
 		return context;
 	}
-	
+
 	public void setContext(Resource context) {
 		this.context = context;
 	}
@@ -44,5 +43,5 @@ public class Relation extends Object implements Serializable {
 	public void setTargetDataType(String targetDataType) {
 		this.targetDataType = targetDataType;
 	}
-	
+
 }
