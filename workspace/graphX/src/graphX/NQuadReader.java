@@ -15,6 +15,7 @@ import org.apache.spark.storage.StorageLevel;
 
 public class NQuadReader {
 
+	@SuppressWarnings("unused")
 	public static void main(String[] args) {
 
 		SparkConf sparkConf = new SparkConf().setAppName("NQuadReader").setMaster("local[*]")
@@ -26,61 +27,45 @@ public class NQuadReader {
 		ClassTag<Relation> relationTag = scala.reflect.ClassTag$.MODULE$.apply(Relation.class);
 
 		Graph<Object, Relation> quadGraph = GraphGenerator.generateGraph(jsc, objectTag, relationTag);
-
-		// sliceDice(quadGraph, jsc, objectTag, relationTag, "Level_Importance_Package",
-		// "Level_Aircraft_All", "Level_Location_All",
-		// "Level_Date_Year").triplets().toJavaRDD().foreach(x ->
-		// System.out.println(x.dstAttr()));
-		// sliceDiceCorrect(quadGraph, jsc, objectTag, relationTag,
-		// "Level_Importance_All-All","Level_Aircraft_All-All",
-		// "Level_Location_All-All", "Level_Date_All-All");
-
-		// merge(quadGraph, jsc, objectTag, relationTag, "Level_Importance_All",
-		// "Level_Aircraft_All", "Level_Location_All", "Level_Date_Year");
-
-		List<Tuple2<Object, Object>> res = getVerticesAttributes(quadGraph, getCellsAndBelow(quadGraph, jsc, objectTag,
-				relationTag, "Level_Importance_All", "Level_Aircraft_All", "Level_Location_All", "Level_Date_Year"));
-		for (int i = 0; i < res.size(); i++) {
-			int j = i;
-			quadGraph.triplets().toJavaRDD().filter(x -> x.srcAttr().equals(res.get(j)));
-		}
-
-		String cell = "urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a";
-		List<Object> importance = quadGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains("hasImportance")
-						&& x.srcAttr().toString().contains(cell))
-				.map(x -> x.dstAttr()).collect();
-		List<Object> aircraft = quadGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains("hasAircraft")
-						&& x.srcAttr().toString().contains(cell))
-				.map(x -> x.dstAttr()).collect();
-		List<Object> location = quadGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains("hasLocation")
-						&& x.srcAttr().toString().contains(cell))
-				.map(x -> x.dstAttr()).collect();
-		List<Object> date = quadGraph.triplets().toJavaRDD().filter(
-				x -> x.attr().getRelationship().toString().contains("hasDate") && x.srcAttr().toString().contains(cell))
-				.map(x -> x.dstAttr()).collect();
-
-		String imp = "";
-		String air = "";
-		String loc = "";
-		String dat = "";
-
-		if (importance.size() == 1 && aircraft.size() == 1 && location.size() == 1 && date.size() == 1) {
-			imp = importance.get(0).toString();
-			air = aircraft.get(0).toString();
-			loc = location.get(0).toString();
-			dat = date.get(0).toString();
-
-		}
-		System.out.println(imp);
-		System.out.println(air);
-		System.out.println(loc);
-		System.out.println(dat);
+		Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag, relationTag,"Level_Importance_All-All","Level_Aircraft_All-All", "Level_Location_All-All", "Level_Date_All-All");
+		Graph<Object, Relation> mergedGraph = merge(quadGraph, jsc, "Level_Importance_Package", "Level_Aircraft_All", "Level_Location_Region", "Level_Date_Year");
+		
+		//todo
+		Graph<Object, Relation> abstractGraph;
 
 		jsc.close();
 
+	}
+
+	private static Graph<Object, Relation> merge(Graph<Object, Relation> graph, JavaSparkContext jsc, String string, String string2,
+			String string3, String string4) {
+		List<Object> importance = getCellsWithLevel(graph, "hasImportance", "Level_Importance_Package");
+		List<Object> aircraft = getCellsWithLevel(graph, "hasAircraft", "Level_Aircraft_All");
+		List<Object> location = getCellsWithLevel(graph, "hasLocation", "Level_Location_Region");
+		List<Object> date = getCellsWithLevel(graph, "hasDate", "Level_Date_Year");
+
+		List<Object> result = new ArrayList<>();
+
+		// compare lists --> if cell is in each --> return it (satisfies all four
+		// dimensions)
+		for (int i = 0; i < importance.size(); i++) {
+			Object o = importance.get(i);
+			if (aircraft.contains(o) && location.contains(o) && date.contains(o)) {
+				result.add(o);
+			}
+		}
+		getVerticesAttributes(graph, result)
+		.forEach(x -> {
+			List<String> covered = new ArrayList<>();
+			covered.addAll(GraphGenerator.getCoverage(x._2.toString(), jsc).map(z -> z+"-mod").collect());
+			graph.triplets().toJavaRDD().foreach(y -> {
+				//System.out.println(y.attr().getContext().toString());
+				if(covered.contains(y.attr().getContext().toString())) {
+					y.attr().setContext(x._2.toString()+"-mod");
+				}
+			});
+			;});
+		return graph;
 	}
 
 	private static List<Tuple2<Object, Object>> getVerticesAttributes(Graph<Object, Relation> graph, List<Object> ids) {
@@ -92,10 +77,10 @@ public class NQuadReader {
 		return result;
 	}
 
-	private static Graph<Object, Relation> sliceDiceCorrect(Graph<Object, Relation> graph, JavaSparkContext jsc,
+	private static Graph<Object, Relation> sliceDice(Graph<Object, Relation> graph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String importanceValue, String aircraftValue,
 			String locationValue, String dateValue) {
-		List<Object> cellIds = getCellsCorrect(graph, jsc, objectTag, relationTag, importanceValue, aircraftValue,
+		List<Object> cellIds = getCellsWithDimValues(graph, jsc, objectTag, relationTag, importanceValue, aircraftValue,
 				locationValue, dateValue);
 		List<String> mods = getMods(graph, cellIds);
 		List<Edge<Relation>> rels = new ArrayList<>();
@@ -126,7 +111,7 @@ public class NQuadReader {
 		return resultGraph;
 	}
 
-	private static List<Object> getCellsCorrect(Graph<Object, Relation> graph, JavaSparkContext jsc,
+	private static List<Object> getCellsWithDimValues(Graph<Object, Relation> graph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String importanceValue, String aircraftValue,
 			String locationValue, String dateValue) {
 		// get cells for each dimension individually
@@ -171,42 +156,6 @@ public class NQuadReader {
 		return result;
 	}
 
-	// get all Data as a Graph that are associated with modules that correspond to
-	// cells that have required dimension levels
-	private static Graph<Object, Relation> sliceDice(Graph<Object, Relation> graph, JavaSparkContext jsc,
-			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String importanceLevel, String aircraftLevel,
-			String locationLevel, String dateLevel) {
-		List<Object> cellIds = getCellsAndBelow(graph, jsc, objectTag, relationTag, importanceLevel, aircraftLevel,
-				locationLevel, dateLevel);
-		List<String> mods = getMods(graph, cellIds);
-		List<Edge<Relation>> rels = new ArrayList<>();
-		for (int i = 0; i < mods.size(); i++) {
-			int j = i;
-			rels.addAll(graph.edges().toJavaRDD()
-					.filter(e -> ((Resource) e.attr().getContext()).getValue().contains(mods.get(j))).collect());
-		}
-
-		List<Tuple2<Object, Object>> moduleVertices = new ArrayList<>();
-		List<Object> vertices = new ArrayList<Object>();
-		// all sources and destinations of all mods
-		rels.forEach(x -> vertices.add(x.dstId()));
-		rels.forEach(x -> vertices.add(x.srcId()));
-		// filter vertices
-		graph.vertices().toJavaRDD().collect().forEach(v -> {
-			if (vertices.contains(v._1)) {
-				moduleVertices.add(v);
-			}
-		});
-		jsc.parallelize(moduleVertices);
-		jsc.parallelize(rels);
-		// create graph obejct from filtered edges and vertices
-		Graph<Object, Relation> resultGraph = Graph.apply(jsc.parallelize(moduleVertices).rdd(),
-				jsc.parallelize(rels).rdd(), "", StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag,
-				relationTag);
-
-		return resultGraph;
-	}
-
 	// get all Mods (string) that belong to the cells that have correct dimensions
 	private static List<String> getMods(Graph<Object, Relation> quadGraph, List<Object> cellIds) {
 		List<String> result = new ArrayList<>();
@@ -225,33 +174,7 @@ public class NQuadReader {
 		return result;
 	}
 
-	// get all cells (their ID) that satisfy dimensionlevels and them below
-	private static List<Object> getCellsAndBelow(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
-			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String importanceLevel, String aircraftLevel,
-			String locationLevel, String dateLevel) {
-		// get cells for each dimension individually
-		List<Object> importance = getCellsWithLevelAndLower(quadGraph, objectTag, relationTag, "hasImportance",
-				importanceLevel);
-		List<Object> aircraft = getCellsWithLevelAndLower(quadGraph, objectTag, relationTag, "hasAircraft",
-				aircraftLevel);
-		List<Object> location = getCellsWithLevelAndLower(quadGraph, objectTag, relationTag, "hasLocation",
-				locationLevel);
-		List<Object> date = getCellsWithLevelAndLower(quadGraph, objectTag, relationTag, "hasDate", dateLevel);
-		List<Object> result = new ArrayList<>();
-
-		// compare lists --> if cell is in each --> return it (satisfies all four
-		// dimensions)
-		for (int i = 0; i < importance.size(); i++) {
-			Object o = importance.get(i);
-			if (aircraft.contains(o) && location.contains(o) && date.contains(o)) {
-				result.add(o);
-			}
-		}
-		return result;
-	}
-
-	private static List<Object> getCellsWithLevel(Graph<Object, Relation> graph, ClassTag<Object> objectTag,
-			ClassTag<Relation> relationTag, String dimension, String level) {
+	private static List<Object> getCellsWithLevel(Graph<Object, Relation> graph, String dimension, String level) {
 		ArrayList<String> levels = new ArrayList<>();
 		levels.add(level);
 
@@ -276,33 +199,4 @@ public class NQuadReader {
 		return result;
 	}
 
-	// gets Cells that have a certain level of a specific dimension and below
-	private static List<Object> getCellsWithLevelAndLower(Graph<Object, Relation> graph, ClassTag<Object> objectTag,
-			ClassTag<Relation> relationTag, String dimension, String level) {
-		ArrayList<String> lowerLevels = new ArrayList<>();
-		lowerLevels.add(level);
-		if (GraphGenerator.getLowerlevels(level) != null) {
-			lowerLevels.addAll(GraphGenerator.getLowerlevels(level));
-		}
-		ArrayList<Long> aList = new ArrayList<>();
-		for (int i = 0; i < lowerLevels.size(); i++) {
-			int j = i;
-			aList.addAll(graph.triplets().toJavaRDD()
-					.filter(triplet -> ((Resource) triplet.attr().getRelationship()).getValue().contains("atLevel")
-							&& triplet.dstAttr().toString().contains(lowerLevels.get(j)))
-					.map(triplet -> triplet.srcId()).collect());
-		}
-
-		List<EdgeTriplet<Object, Relation>> g = graph.triplets().toJavaRDD()
-				.filter(triplet -> ((Resource) triplet.attr().getRelationship()).getValue().contains(dimension))
-				.collect();
-
-		List<Object> result = new ArrayList<>();
-		for (int i = 0; i < g.size(); i++) {
-			if (aList.contains(g.get(i).dstId())) {
-				result.add(g.get(i).srcId());
-			}
-		}
-		return result;
-	}
 }

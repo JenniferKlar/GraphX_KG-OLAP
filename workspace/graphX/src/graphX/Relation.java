@@ -24,7 +24,7 @@ public class Relation extends Object implements Serializable {
 		return relationship;
 	}
 
-	public void setRelationship(Resource relationship) {
+	public void setRelationship(Object relationship) {
 		this.relationship = relationship;
 	}
 
@@ -32,7 +32,7 @@ public class Relation extends Object implements Serializable {
 		return context;
 	}
 
-	public void setContext(Resource context) {
+	public void setContext(Object context) {
 		this.context = context;
 	}
 
