@@ -5,12 +5,18 @@ import org.apache.spark.SparkConf;
 import scala.reflect.ClassTag;
 import scala.Tuple2;
 
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.graphx.Edge;
 import org.apache.spark.graphx.EdgeTriplet;
 import org.apache.spark.graphx.Graph;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+
+import javax.security.auth.x500.X500Principal;
+
 import org.apache.spark.storage.StorageLevel;
 
 public class NQuadReader {
@@ -27,22 +33,74 @@ public class NQuadReader {
 		ClassTag<Relation> relationTag = scala.reflect.ClassTag$.MODULE$.apply(Relation.class);
 
 		Graph<Object, Relation> quadGraph = GraphGenerator.generateGraph(jsc, objectTag, relationTag);
-		Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag, relationTag,"Level_Importance_All-All","Level_Aircraft_All-All", "Level_Location_All-All", "Level_Date_All-All");
-		Graph<Object, Relation> mergedGraph = merge(quadGraph, jsc, "Level_Importance_Package", "Level_Aircraft_All", "Level_Location_Region", "Level_Date_Year");
+		// Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag, relationTag,"Level_Importance_All-All","Level_Aircraft_All-All","Level_Location_All-All", "Level_Date_All-All");
+		// Graph<Object, Relation> mergedGraph = merge(quadGraph, jsc,"Level_Importance_Package", "Level_Aircraft_All", "Level_Location_Region","Level_Date_Year");
 		
-		//todo
-		Graph<Object, Relation> abstractGraph;
+		//tripleGeneratingAbstraction
+		Graph<Object, Relation> replaceAreaUsageGraph = replaceByGrouping(quadGraph, jsc, objectTag, relationTag,
+				"ManoeuvringAreaUsage", "usageType");
 
 		jsc.close();
 
 	}
 
-	private static Graph<Object, Relation> merge(Graph<Object, Relation> graph, JavaSparkContext jsc, String string, String string2,
-			String string3, String string4) {
-		List<Object> importance = getCellsWithLevel(graph, "hasImportance", "Level_Importance_Package");
-		List<Object> aircraft = getCellsWithLevel(graph, "hasAircraft", "Level_Aircraft_All");
-		List<Object> location = getCellsWithLevel(graph, "hasLocation", "Level_Location_Region");
-		List<Object> date = getCellsWithLevel(graph, "hasDate", "Level_Date_Year");
+	private static Graph<Object, Relation> replaceByGrouping(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String toBeReplaced, String groupingValue) {
+		// triple generating - manoeveringareausage
+		// get instances of type manouveringareausage
+		List<String> manoeuveringAreaUsage = quadGraph.triplets().toJavaRDD()
+				.filter(x -> x.dstAttr().toString().contains(toBeReplaced)).map(x -> x.srcAttr().toString()).collect();
+		// get usageType for manouveringareausage
+
+		Set<Edge<Relation>> allEdges = new LinkedHashSet<>();
+		Set<Edge<Relation>> toBeRemovedEdges = new LinkedHashSet<>();
+
+		List<Edge<Relation>> newTriplets = new ArrayList<>();
+		List<Edge<Relation>> removeTriplets = new ArrayList<>();
+
+		for (int i = 0; i < manoeuveringAreaUsage.size(); i++) {
+			int j = i;
+			// get the grouping - schould only be of size 1 for each
+			List<String> grouping = quadGraph.triplets().toJavaRDD()
+					.filter(x -> x.srcAttr().toString().contains(manoeuveringAreaUsage.get(j))
+							&& x.attr().getRelationship().toString().contains(groupingValue))
+					.map(x -> x.dstAttr().toString()).collect();
+			List<Object> groupingId = quadGraph.vertices().toJavaRDD()
+					.filter(x -> x._2.toString().contains(grouping.get(0))).map(x -> x._1).collect();
+
+			// triples to add to the graph
+			newTriplets = quadGraph.triplets().toJavaRDD()
+					.filter(x -> x.srcAttr().toString().contains(manoeuveringAreaUsage.get(j)))
+					.map(x -> new Edge<Relation>((long) groupingId.get(0), x.dstId(), x.attr())).collect();
+
+			// triples to be removed
+			removeTriplets = quadGraph.triplets().toJavaRDD()
+					.filter(x -> x.srcAttr().toString().contains(manoeuveringAreaUsage.get(j)))
+					.map(x -> new Edge<Relation>(x.srcId(), x.dstId(), x.attr())).collect();
+			allEdges.addAll(newTriplets);
+			toBeRemovedEdges.addAll(removeTriplets);
+
+		}
+
+		List<Edge<Relation>> edgeList = new ArrayList<Edge<Relation>>();
+
+		edgeList.addAll(quadGraph.edges().toJavaRDD().collect());
+		edgeList.addAll(allEdges);
+		edgeList.removeAll(toBeRemovedEdges);
+		JavaRDD<Edge<Relation>> edges = jsc.parallelize(edgeList);
+		edges = edges.filter(x -> !x.attr().getRelationship().toString().contains(groupingValue));
+
+		Graph<Object, Relation> graph = Graph.apply(quadGraph.vertices().toJavaRDD().rdd(), edges.rdd(), "",
+				StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag, relationTag);
+		return graph;
+	}
+
+	private static Graph<Object, Relation> merge(Graph<Object, Relation> graph, JavaSparkContext jsc,
+			String levelImportance, String levelAircraft, String levelLocation, String levelDate) {
+		List<Object> importance = getCellsWithLevel(graph, "hasImportance", levelImportance);
+		List<Object> aircraft = getCellsWithLevel(graph, "hasAircraft", levelAircraft);
+		List<Object> location = getCellsWithLevel(graph, "hasLocation", levelLocation);
+		List<Object> date = getCellsWithLevel(graph, "hasDate", levelDate);
 
 		List<Object> result = new ArrayList<>();
 
@@ -54,17 +112,17 @@ public class NQuadReader {
 				result.add(o);
 			}
 		}
-		getVerticesAttributes(graph, result)
-		.forEach(x -> {
+		getVerticesAttributes(graph, result).forEach(x -> {
 			List<String> covered = new ArrayList<>();
-			covered.addAll(GraphGenerator.getCoverage(x._2.toString(), jsc).map(z -> z+"-mod").collect());
+			covered.addAll(GraphGenerator.getCoverage(x._2.toString(), jsc).map(z -> z + "-mod").collect());
 			graph.triplets().toJavaRDD().foreach(y -> {
-				//System.out.println(y.attr().getContext().toString());
-				if(covered.contains(y.attr().getContext().toString())) {
-					y.attr().setContext(x._2.toString()+"-mod");
+				// System.out.println(y.attr().getContext().toString());
+				if (covered.contains(y.attr().getContext().toString())) {
+					y.attr().setContext(x._2.toString() + "-mod");
 				}
 			});
-			;});
+			;
+		});
 		return graph;
 	}
 

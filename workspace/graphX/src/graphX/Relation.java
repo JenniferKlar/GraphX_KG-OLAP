@@ -44,4 +44,41 @@ public class Relation extends Object implements Serializable {
 		this.targetDataType = targetDataType;
 	}
 
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + ((context == null) ? 0 : context.hashCode());
+		result = prime * result + ((relationship == null) ? 0 : relationship.hashCode());
+		result = prime * result + ((targetDataType == null) ? 0 : targetDataType.hashCode());
+		return result;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		Relation other = (Relation) obj;
+		if (context == null) {
+			if (other.context != null)
+				return false;
+		} else if (!context.equals(other.context))
+			return false;
+		if (relationship == null) {
+			if (other.relationship != null)
+				return false;
+		} else if (!relationship.equals(other.relationship))
+			return false;
+		if (targetDataType == null) {
+			if (other.targetDataType != null)
+				return false;
+		} else if (!targetDataType.equals(other.targetDataType))
+			return false;
+		return true;
+	}
+
 }
