@@ -36,6 +36,7 @@ public class NQuadReader {
 		// Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag, relationTag,"Level_Importance_All-All","Level_Aircraft_All-All","Level_Location_All-All", "Level_Date_All-All");
 		// Graph<Object, Relation> mergedGraph = merge(quadGraph, jsc,"Level_Importance_Package", "Level_Aircraft_All", "Level_Location_Region","Level_Date_Year");
 		
+		
 		//tripleGeneratingAbstraction
 		Graph<Object, Relation> replaceAreaUsageGraph = replaceByGrouping(quadGraph, jsc, objectTag, relationTag,
 				"ManoeuvringAreaUsage", "usageType");
