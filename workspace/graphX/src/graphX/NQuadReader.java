@@ -33,16 +33,80 @@ public class NQuadReader {
 		ClassTag<Relation> relationTag = scala.reflect.ClassTag$.MODULE$.apply(Relation.class);
 
 		Graph<Object, Relation> quadGraph = GraphGenerator.generateGraph(jsc, objectTag, relationTag);
-		// Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag, relationTag,"Level_Importance_All-All","Level_Aircraft_All-All","Level_Location_All-All", "Level_Date_All-All");
-		// Graph<Object, Relation> mergedGraph = merge(quadGraph, jsc,"Level_Importance_Package", "Level_Aircraft_All", "Level_Location_Region","Level_Date_Year");
 		
 		
-		//tripleGeneratingAbstraction
-		Graph<Object, Relation> replaceAreaUsageGraph = replaceByGrouping(quadGraph, jsc, objectTag, relationTag,
-				"ManoeuvringAreaUsage", "usageType");
+		// Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag,relationTag,"Level_Importance_All-All","Level_Aircraft_All-All","Level_Location_All-All", "Level_Date_All-All");
+		
+		//Graph<Object, Relation> mergedGraph = merge(quadGraph,jsc,"Level_Importance_Package", "Level_Aircraft_All","Level_Location_Region","Level_Date_Year");
+
+		// tripleGeneratingAbstraction
+		// Graph<Object, Relation> replaceAreaUsageGraph = replaceByGrouping(quadGraph,jsc, objectTag, relationTag,"ManoeuvringAreaUsage", "usageType");
+
+		// individualGeneratingAbstraction
+		Graph<Object, Relation> groupOperationalStatus = groupByProperty(quadGraph, jsc, objectTag, relationTag,
+				"operationalStatus", "<http://example.org/kgolap/object-model#grouping>",
+				"<urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod> ");
 
 		jsc.close();
 
+	}
+
+	private static Graph<Object, Relation> groupByProperty(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String groupingProperty,
+			String groupingPredicate, String mod) {
+
+		JavaRDD<String> groupsRDD = quadGraph.triplets().toJavaRDD()
+				.filter(x -> x.attr().getRelationship().toString().contains(groupingProperty))
+				.map(x -> x.dstAttr().toString());
+		List<String> groups = groupsRDD.distinct().collect();
+		System.out.println(groups.size());
+		List<Tuple2<Object, Object>> currentVertices = new ArrayList<>(quadGraph.vertices().toJavaRDD().collect());
+		Set<Edge<Relation>> newEdges = new LinkedHashSet<>();
+		Set<Edge<Relation>> toBeRemovedEdges = new LinkedHashSet<>();
+		List<Edge<Relation>> newTriplets = new ArrayList<>();
+
+		for (int i = 0; i < groups.size(); i++) {
+			int j = i;
+			// create and add new Vertex
+			Resource newResource = new Resource(groups.get(j) + "-Group");
+			Tuple2<Object, Object> newVertice = new Tuple2<Object, Object>(quadGraph.vertices().count() + j,
+					newResource);
+			currentVertices.add(newVertice);
+
+			// reference to grouping
+			Relation newRelation = new Relation(groupingPredicate, mod, "Resource");
+			// all individuals with the same property e.g. operationalStatus
+			List<Long> verticesToBeReplaced = quadGraph.triplets().toJavaRDD()
+					.filter(x -> x.dstAttr().toString().contains(groups.get(j))).map(x -> x.srcId()).collect();
+			// for each individual a reference to the new grouping
+			for (int k = 0; k < verticesToBeReplaced.size(); k++) {
+				int l = k;
+				Edge<Relation> newEdge = new Edge<Relation>(verticesToBeReplaced.get(k),
+						quadGraph.vertices().count() + j, newRelation);
+				newEdges.add(newEdge);
+				// edges to be removed
+				List<Edge<Relation>> removeTriplets = quadGraph.triplets().toJavaRDD()
+						.filter(x -> x.srcId() == (verticesToBeReplaced.get(l)))
+						.map(x -> new Edge<Relation>(x.srcId(), x.dstId(), x.attr())).collect();
+				toBeRemovedEdges.addAll(removeTriplets);
+				// add new Triples where individuals are replaced by grouping
+				newTriplets = quadGraph.triplets().toJavaRDD().filter(x -> x.srcId() == (verticesToBeReplaced.get(l)))
+						.map(x -> new Edge<Relation>((long) newVertice._1, x.dstId(), x.attr())).collect();
+				newEdges.addAll(newTriplets);
+			}
+
+		}
+		List<Edge<Relation>> edgeList = new ArrayList<Edge<Relation>>();
+		edgeList.addAll(quadGraph.edges().toJavaRDD().collect());
+		edgeList.addAll(newEdges);
+		edgeList.removeAll(toBeRemovedEdges);
+		JavaRDD<Edge<Relation>> edges = jsc.parallelize(edgeList);
+		JavaRDD<Tuple2<Object, Object>> vertices = jsc.parallelize(currentVertices);
+
+		Graph<Object, Relation> graph = Graph.apply(vertices.rdd(), edges.rdd(), "", StorageLevel.MEMORY_ONLY(),
+				StorageLevel.MEMORY_ONLY(), objectTag, relationTag);
+
+		return graph;
 	}
 
 	private static Graph<Object, Relation> replaceByGrouping(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
