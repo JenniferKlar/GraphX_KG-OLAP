@@ -31,7 +31,7 @@ public class GraphGenerator {
 
 		Set<Object> set = new LinkedHashSet<>();
 		set.addAll(javaRDD.map(x -> new Resource(x.getSubject().toString())).collect());
-		set.addAll(javaRDD.filter(x -> x.getObject().isLiteral()).map(x -> x.getObject().toString()).collect());
+		set.addAll(javaRDD.filter(x -> x.getObject().isLiteral()).map(x -> x.getObject().getLiteralValue().toString()).collect());
 		set.addAll(javaRDD.filter(x -> !x.getObject().isLiteral()).map(x -> new Resource(x.getObject().toString()))
 				.collect());
 
@@ -40,7 +40,7 @@ public class GraphGenerator {
 		// all Objects that are Literals
 		JavaRDD<Edge<Relation>> literalEdges = javaRDD.filter(x -> x.getObject().isLiteral())
 				.map(x -> new Edge<Relation>(verticesList.indexOf(new Resource(x.getSubject().toString())),
-						verticesList.indexOf(x.getObject().toString()),
+						verticesList.indexOf(x.getObject().getLiteralValue().toString()),
 						new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
 								x.getObject().getLiteralDatatype().getJavaClass().getSimpleName().toString())));
 
@@ -77,7 +77,7 @@ public class GraphGenerator {
 	}
 
 	// returns a list of all rollup relationships of certain given instance
-	static JavaRDD<String> getLowerInstances(String instance, JavaSparkContext jsc) {
+	static JavaRDD<String> getCoveredInstances(String instance, JavaSparkContext jsc) {
 		HashMap<String, JavaRDD<String>> instanceMap = new HashMap<String, JavaRDD<String>>();
 		ArrayList<String> aircraftAll = new ArrayList<>();
 		aircraftAll.add("c82c7d6ae614");
