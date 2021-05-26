@@ -1,5 +1,7 @@
 package graphX;
 
+import java.util.UUID;
+
 import org.apache.spark.SparkConf;
 
 import scala.reflect.ClassTag;
@@ -11,6 +13,7 @@ import org.apache.spark.graphx.Edge;
 import org.apache.spark.graphx.EdgeTriplet;
 import org.apache.spark.graphx.Graph;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -21,7 +24,6 @@ public class NQuadReader {
 
 	@SuppressWarnings("unused")
 	public static void main(String[] args) {
-
 		SparkConf sparkConf = new SparkConf().setAppName("NQuadReader").setMaster("local[*]")
 				.set("spark.executor.memory", "2g").set("spark.executor.cores", "1")
 				.set("spark.dynamicAllocation.enabled", "true")
@@ -43,23 +45,15 @@ public class NQuadReader {
 
 //		// tripleGeneratingAbstraction - replaceByGrouping
 //		
-//		 Graph<Object, Relation> replaceAreaUsageGraph =
-//		 replaceByGrouping(quadGraph,jsc, objectTag,
-//		 relationTag,"ManoeuvringAreaUsage", "usageType");
-
+//		 Graph<Object, Relation> replaceAreaUsageGraph 
+//		 = replaceByGrouping(quadGraph, jsc, objectTag, relationTag,"ManoeuvringAreaUsage", "usageType");
 //		 
 //
 //		// individualGeneratingAbstraction
-//		
 //		Graph<Object, Relation> groupOperationalStatus = groupByProperty(quadGraph, jsc, objectTag, relationTag,
-//				"operationalStatus", "<http://example.org/kgolap/object-model#grouping>",
-//				"<urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod> ");
+//				"operationalStatus", "http://example.org/kgolap/object-model#grouping",
+//				"urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod");
 
-		// aggregatePropertyValues - value-generating abstraction only makes sense after
-		// grouping??
-//		Graph<Object, Relation> wingSpanGraph = groupWingSpan(quadGraph, jsc, objectTag, relationTag,
-//				"wingspanInterpretation", "wingspan", "-mod>", "AVG");
-//
 
 		// Pivoting
 		// for specific context!
@@ -68,11 +62,66 @@ public class NQuadReader {
 //				"http://example.org/kgolap/object-model#ManoeuvringAreaAvailability",
 //				"urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
 		
-		//Reification
-		
 
+		//Reification
+//		Graph<Object, Relation> reificationUsage = 
+//		reificationGraph(quadGraph, jsc, objectTag, relationTag,"urn:uuid:0acc4b38-168d-4a33-898c-258b89881556-mod", "http://example.org/kgolap/object-model#usage",
+//				"http://example.org/kgolap/object-model#usage-type", "http://www.w3.org/1999/02/22-rdf-syntax-ns#object", "http://www.w3.org/1999/02/22-rdf-syntax-ns#subject");
+//		
+
+			//aggregatePropertyValues + aggregateProperty - needs some grouping (probably most of the time)
+//		 Graph<Object, Relation> replaceAircraftCharacteristics 
+//		 = replaceByGrouping(quadGraph, jsc, objectTag, relationTag,"AircraftCharacteristic", "wingspanInterpretation");
+//		 Graph<Object, Relation> wingspanSum = aggregatePropertyValues(replaceAircraftCharacteristics, jsc, objectTag, relationTag, 
+//				 "http://example.org/kgolap/object-model#wingspan", "<urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod>", "SUM"); 
+//		 wingspanAverage.triplets().toJavaRDD().foreach(x -> System.out.println(x.srcAttr() + " " + x.attr().getRelationship().toString() + " " + x.dstAttr() + " " + x.attr().getContext().toString()));
+
+		 Graph<Object, Relation> replaceAircraftCharacteristics 
+		 = groupByProperty(quadGraph, jsc, objectTag, relationTag,"http://example.org/kgolap/object-model#wingspanInterpretation", "http://example.org/kgolap/object-model#grouping", "<urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod>");
+		 //replaceAircraftCharacteristics.triplets().toJavaRDD().foreach(x -> System.out.println(x.srcAttr() + " " + x.attr().getRelationship().toString() + " " + x.dstAttr() + " " + x.attr().getContext().toString()));
+
+		 Graph<Object, Relation> wingspanSum = aggregatePropertyValues(replaceAircraftCharacteristics, jsc, objectTag, relationTag, 
+				 "http://example.org/kgolap/object-model#wingspan", "<urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod>", "SUM"); 
+		 wingspanSum.triplets().toJavaRDD().foreach(x -> System.out.println(x.srcAttr() + " " + x.attr().getRelationship().toString() + " " + x.dstAttr() + " " + x.attr().getContext().toString()));
+		 	
+	}
+	private static Graph<Object, Relation> reificationGraph(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String context, String reifictaionPredicate, String type, String object, String subject) {
+		
+		List<EdgeTriplet<Object, Relation>> statements = 
+				quadGraph.triplets().toJavaRDD().filter(x -> x.attr().getRelationship().toString().contains(reifictaionPredicate)).collect();
+		List<Tuple2<Object, Object>> newVertices = new ArrayList<Tuple2<Object, Object>>();
+		List<Edge<Relation>> newEdges = new ArrayList<Edge<Relation>>();
+		
+		List<Tuple2<Object, Object>> allVertices = new ArrayList<Tuple2<Object, Object>>();
+		allVertices.addAll(quadGraph.vertices().toJavaRDD().collect());
+		List<Edge<Relation>> allEdges = new ArrayList<Edge<Relation>>();
+		allEdges.addAll(quadGraph.edges().toJavaRDD().collect());
+
+		Long typeID = quadGraph.vertices().count() + 1;
+		Tuple2<Object, Object> typeVertice= new Tuple2<Object, Object>(typeID, type);
+		newVertices.add(typeVertice);
+		
+		Relation objectRelation = new Relation(object, context, "Resource");
+		Relation subjectRelation = new Relation(subject, context, "Resource");
+		Relation typeRelation = new Relation(type, context, "Resource");
+		statements.forEach(x -> {
+					String uuid = "urn:uuid:"+UUID.randomUUID().toString();
+					newVertices.add(new Tuple2<Object, Object>((long) (quadGraph.vertices().count() + 2L + statements.indexOf(x)), uuid));
+					newEdges.add(new Edge<Relation>((long) (quadGraph.vertices().count() + 2L + statements.indexOf(x)), x.srcId(), subjectRelation)); //subject
+					newEdges.add(new Edge<Relation>((long) (quadGraph.vertices().count() + 2L + statements.indexOf(x)), x.dstId(), objectRelation)); //object
+					newEdges.add(new Edge<Relation>((long) (quadGraph.vertices().count() + 2L + statements.indexOf(x)), typeID, typeRelation)); //type
+		});
+		allVertices.addAll(newVertices);
+		allEdges.addAll(newEdges);
+		
+		Graph<Object, Relation> graph = Graph.apply(jsc.parallelize(allVertices).rdd(),
+				jsc.parallelize(allEdges).rdd(), "", StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag,
+				relationTag);
+		return graph;
 	}
 
+	
 	private static Graph<Object, Relation> pivotGraph(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String dimensionProperty, String pivotProperty, String type,
 			String selectionCondition, String context) {
@@ -97,56 +146,35 @@ public class NQuadReader {
 		Graph<Object, Relation> graph = Graph.apply(jsc.parallelize(quadGraph.vertices().toJavaRDD().collect()).rdd(),
 				jsc.parallelize(oldEdges).rdd(), "", StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag,
 				relationTag);
-
 		return graph;
 	}
 
-	private static Graph<Object, Relation> groupWingSpan(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
-			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String interpretation, String groupingProperty,
+	
+	private static Graph<Object, Relation> aggregatePropertyValues(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String wingspan,
 			String mod, String aggregateType) {
-		JavaRDD<String> wingSpanGroupsRDD = quadGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains(interpretation))
-				.map(x -> x.dstAttr().toString());
-		List<String> wingSpanGroups = wingSpanGroupsRDD.distinct().collect();
+		JavaRDD<String> wingspanVerticesRDD = quadGraph.triplets().toJavaRDD()
+				.filter(x -> x.attr().getRelationship().toString().equals(wingspan))
+				.map(x -> x.srcAttr().toString());
+		List<String> wingspanVertices = wingspanVerticesRDD.distinct().collect();
 
 		List<Tuple2<Object, Object>> currentVertices = new ArrayList<>(quadGraph.vertices().toJavaRDD().collect());
 		Set<Edge<Relation>> newEdges = new LinkedHashSet<>();
-		Set<Edge<Relation>> edgesToBeRemoved = new LinkedHashSet<>();
 
-		wingSpanGroups.forEach(x -> {
-			double sum = 0;
-			double count = 0;
-			double avg = 0;
-			double max = 0;
-			double min = 0;
-			List<String> verticesString = quadGraph.triplets().toJavaRDD()
-					.filter(z -> z.dstAttr().toString().contains(x)).map(z -> z.srcAttr().toString()).collect();
-
-			String oldVertice = "";
-			for (int k = 0; k < verticesString.size(); k++) {
-				int l = k;
-
+		wingspanVertices.forEach(x -> {
 				// only size 1
-				List<Long> summe = quadGraph.triplets().toJavaRDD()
-						.filter(z -> z.srcAttr().toString().contains(verticesString.get(l))
-								&& z.attr().getRelationship().toString().contains(groupingProperty)
+			Long sum = quadGraph.triplets().toJavaRDD()
+						.filter(z -> z.srcAttr().toString().contains(x)
+								&& z.attr().getRelationship().toString().equals(wingspan)
 								&& z.attr().getTargetDataType() != "Resource")
-						.map(z -> Long.parseLong(z.dstAttr().toString())).collect();
-				oldVertice = verticesString.get(l);
-				sum = sum + summe.get(0);
-				count++;
-				avg = sum / count;
-				if (max == 0 || max < summe.get(0)) {
-					max = summe.get(0);
-				}
-				if (min == 0 || min > summe.get(0)) {
-					min = summe.get(0);
-				}
-			}
+						.map(z -> Long.parseLong(z.dstAttr().toString())).reduce((a,b) -> a+b);
+			Long count = quadGraph.triplets().toJavaRDD()
+					.filter(z -> z.srcAttr().toString().contains(x)
+							&& z.attr().getRelationship().toString().equals(wingspan)).count();
 
-			double value = 0;
+			Long value = null;
 			if (aggregateType.contains("AVG")) {
-				value = avg;
+				value = sum / count;
 			}
 			if (aggregateType.contains("COUNT")) {
 				value = count;
@@ -155,42 +183,46 @@ public class NQuadReader {
 				value = sum;
 			}
 			if (aggregateType.contains("MIN")) {
-				value = min;
+				value = quadGraph.triplets().toJavaRDD()
+						.filter(z -> z.srcAttr().toString().contains(x)
+								&& z.attr().getRelationship().toString().contains(wingspan))
+						.map(z -> Long.parseLong(z.dstAttr().toString())).min(Comparator.naturalOrder());
 			}
 			if (aggregateType.contains("MAX")) {
-				value = max;
+				value = quadGraph.triplets().toJavaRDD()
+						.filter(z -> z.srcAttr().toString().contains(x)
+								&& z.attr().getRelationship().toString().contains(wingspan))
+						.map(z -> Long.parseLong(z.dstAttr().toString())).max(Comparator.naturalOrder());
 			}
-			// new Vertice with new Value
-			String literal = Double.toString(value);
+			
+			String literal = Long.toString(value);
 			Tuple2<Object, Object> newVertice = new Tuple2<Object, Object>(
-					quadGraph.vertices().count() + wingSpanGroups.indexOf(x), literal);
+					quadGraph.vertices().count() + wingspanVertices.indexOf(x), literal);
 			currentVertices.add(newVertice);
-
+			
 			// new edge with old vertice and new value..
-			Long oldVerticeID = getVerticeId(quadGraph, oldVertice);
-			Edge<Relation> newEdge = new Edge<Relation>(oldVerticeID,
-					quadGraph.vertices().count() + wingSpanGroups.indexOf(x),
-					new Relation(groupingProperty, mod, Double.class.getSimpleName().toString()));
+			Long verticeID = getVerticeId(quadGraph, x);
+			Edge<Relation> newEdge = new Edge<Relation>(verticeID,
+					quadGraph.vertices().count() + wingspanVertices.indexOf(x),
+					new Relation(wingspan, mod, Double.class.getSimpleName().toString()));
 			newEdges.add(newEdge);
 		});
-
-		// Edges to be removed
+		
 		List<Edge<Relation>> removeTriplets = quadGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains(groupingProperty)
-						&& x.attr().getTargetDataType() != "Resource")
+				.filter(x -> x.attr().getRelationship().toString().equals(wingspan))
 				.map(x -> new Edge<Relation>(x.srcId(), x.dstId(), x.attr())).collect();
-		edgesToBeRemoved.addAll(removeTriplets);
 
 		List<Edge<Relation>> edgeList = new ArrayList<Edge<Relation>>();
 		edgeList.addAll(quadGraph.edges().toJavaRDD().collect());
+		edgeList.removeAll(removeTriplets);
 		edgeList.addAll(newEdges);
-		edgeList.removeAll(edgesToBeRemoved);
 
 		Graph<Object, Relation> graph = Graph.apply(jsc.parallelize(currentVertices).rdd(),
 				jsc.parallelize(edgeList).rdd(), "", StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag,
 				relationTag);
 		return graph;
 	}
+	
 
 	private static Graph<Object, Relation> groupByProperty(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String groupingProperty,
@@ -222,7 +254,7 @@ public class NQuadReader {
 						newRelation);
 				newEdges.add(newEdge);
 				// edges to be removed
-				List<Edge<Relation>> removeEdges = quadGraph.triplets().toJavaRDD().filter(z -> z.srcId() == (y))
+				List<Edge<Relation>> removeEdges = quadGraph.triplets().toJavaRDD().filter(z -> z.srcId() == y)
 						.map(z -> new Edge<Relation>(z.srcId(), z.dstId(), z.attr())).collect();
 				edgesToBeRemoved.addAll(removeEdges);
 				// add new Triples where individuals are replaced by grouping
