@@ -274,5 +274,6 @@
 	<classpathentry kind="lib" path="jars/zookeeper-3.4.14.jar"/>
 	<classpathentry kind="lib" path="jars/zstd-jni-1.4.4-3.jar"/>
 	<classpathentry kind="lib" path="jars/graphframes-0.8.1-spark2.4-s_2.12.jar"/>
+	<classpathentry kind="lib" path="jars/spark-indexedrdd-0.3.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

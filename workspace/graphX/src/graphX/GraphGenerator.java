@@ -6,10 +6,12 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import org.apache.jena.riot.Lang;
 import org.apache.jena.riot.RDFDataMgr;
 import org.apache.jena.sparql.core.Quad;
+import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.graphx.Edge;
@@ -28,38 +30,29 @@ public class GraphGenerator {
 		String path = "C:\\Users\\jenniffer\\Dropbox\\Masterarbeit";
 
 		JavaRDD<Quad> javaRDD = getJavaRDD(path, jsc);
-
-		Set<Object> set = new LinkedHashSet<>();
-		set.addAll(javaRDD.map(x -> new Resource(x.getSubject().toString())).collect());
-		set.addAll(javaRDD.filter(x -> x.getObject().isLiteral()).map(x -> x.getObject().getLiteralValue().toString()).collect());
-		set.addAll(javaRDD.filter(x -> !x.getObject().isLiteral()).map(x -> new Resource(x.getObject().toString()))
-				.collect());
-
-		List<Object> verticesList = new ArrayList<>(set);
-
+				
+		JavaRDD<Tuple2<Object, Object>> vertices = javaRDD.map(x -> (Object) new Resource(x.getSubject().toString()))
+		.union(javaRDD.filter(x -> x.getObject().isLiteral()).map(x -> x.getObject().getLiteralValue().toString()))
+		.union(javaRDD.filter(x -> !x.getObject().isLiteral()).map(x -> new Resource(x.getObject().toString()))).distinct()
+		.map(x -> new Tuple2<Object, Object>(UUID.nameUUIDFromBytes(x.toString().getBytes()).getMostSignificantBits(), x));
+		
 		// all Objects that are Literals
 		JavaRDD<Edge<Relation>> literalEdges = javaRDD.filter(x -> x.getObject().isLiteral())
-				.map(x -> new Edge<Relation>(verticesList.indexOf(new Resource(x.getSubject().toString())),
-						verticesList.indexOf(x.getObject().getLiteralValue().toString()),
+				.map(x -> 
+				new Edge<Relation>(UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
+						UUID.nameUUIDFromBytes(x.getObject().getLiteralValue().toString().getBytes()).getMostSignificantBits(),
 						new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
 								x.getObject().getLiteralDatatype().getJavaClass().getSimpleName().toString())));
 
 		// all Objects that are Resources
 		JavaRDD<Edge<Relation>> resourceEdges = javaRDD.filter(x -> !x.getObject().isLiteral())
-				.map(x -> new Edge<Relation>(verticesList.indexOf(new Resource(x.getSubject().toString())),
-						verticesList.indexOf(new Resource(x.getObject().toString())),
+				.map(x -> 
+				new Edge<Relation>(UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
+						UUID.nameUUIDFromBytes(new Resource(x.getObject().toString()).toString().getBytes()).getMostSignificantBits(),
 						new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
 								"Resource")));
 
 		JavaRDD<Edge<Relation>> quadEdgeRDD = literalEdges.union(resourceEdges);
-
-		// add IDs to Vertices from their Index
-		JavaRDD<Tuple2<Object, Object>> vertices = jsc.parallelize(verticesList).zipWithIndex()
-				.map(x -> new Tuple2<Object, Object>(x._2, x._1));
-
-		// create RDDs from lists
-		// JavaRDD<Edge<Relation>> quadEdgeRDD = jsc.parallelize(quadEdges);
-
 		Graph<Object, Relation> quadGraph = Graph.apply(vertices.rdd(), quadEdgeRDD.rdd(), "",
 				StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag, relationTag);
 
