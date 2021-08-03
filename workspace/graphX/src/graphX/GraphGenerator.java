@@ -25,11 +25,10 @@ public class GraphGenerator {
 	public GraphGenerator() {
 	}
 
-	public static Graph<Object, Relation> generateGraph(JavaSparkContext jsc, ClassTag<Object> objectTag,
-			ClassTag<Relation> relationTag) {
-		String path = "C:\\Users\\jenniffer\\Dropbox\\Masterarbeit";
+	public static Graph<Object, Relation> generateGraph(JavaSparkContext jsc, ClassTag<Object> vertexTag,
+			ClassTag<Relation> edgeTag, String path, String fileName) {
 
-		JavaRDD<Quad> javaRDD = getJavaRDD(path, jsc);
+		JavaRDD<Quad> javaRDD = getJavaRDD(path, fileName, jsc);
 				
 		JavaRDD<Tuple2<Object, Object>> vertices = javaRDD.map(x -> (Object) new Resource(x.getSubject().toString()))
 		.union(javaRDD.filter(x -> x.getObject().isLiteral()).map(x -> x.getObject().getLiteralValue().toString()))
@@ -54,15 +53,15 @@ public class GraphGenerator {
 
 		JavaRDD<Edge<Relation>> quadEdgeRDD = literalEdges.union(resourceEdges);
 		Graph<Object, Relation> quadGraph = Graph.apply(vertices.rdd(), quadEdgeRDD.rdd(), "",
-				StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag, relationTag);
+				StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), vertexTag, edgeTag);
 
 		return quadGraph;
 	}
 
 	// get JavaRDD from n-quad file
-	private static JavaRDD<Quad> getJavaRDD(String path, JavaSparkContext jsc) {
+	private static JavaRDD<Quad> getJavaRDD(String path, String fileName,JavaSparkContext jsc) {
 
-		JavaRDD<Quad> javaRDD = jsc.textFile(path + "\\output_short.nq").filter(line -> !line.startsWith("#"))
+		JavaRDD<Quad> javaRDD = jsc.textFile(path + "\\"+ fileName).filter(line -> !line.startsWith("#"))
 				.filter(line -> !line.isEmpty() || line.length() != 0).map(line -> RDFDataMgr
 						.createIteratorQuads(new ByteArrayInputStream(line.getBytes()), Lang.NQUADS, null).next());
 		javaRDD.persist(StorageLevel.MEMORY_AND_DISK());

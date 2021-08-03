@@ -28,12 +28,15 @@ public class Relation extends Object implements Serializable {
 		this.relationship = relationship;
 	}
 
-	public Object getContext() {
-		return context;
+	public String getContext() {
+		return context.toString();
 	}
 
 	public void setContext(Object context) {
 		this.context = context;
+	}
+	public Relation updateContext(Object newContext) {
+		return new Relation(this.relationship, newContext, this.targetDataType);
 	}
 
 	public String getTargetDataType() {

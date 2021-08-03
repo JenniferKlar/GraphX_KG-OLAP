@@ -10,6 +10,7 @@ import org.apache.hadoop.hive.ql.parse.HiveParser_IdentifiersParser.groupingExpr
 import org.apache.parquet.filter2.predicate.Operators.BinaryColumn;
 import org.apache.spark.SparkConf;
 import scala.reflect.ClassTag;
+import scala.tools.nsc.backend.jvm.BackendReporting.ResultingMethodTooLarge;
 import scala.Tuple2;
 import scala.Tuple3;
 import scala.Tuple4;
@@ -28,6 +29,7 @@ import org.apache.spark.graphx.VertexRDD;
 import org.apache.spark.graphx.impl.AggregatingEdgeContext;
 import org.apache.spark.rdd.RDD;
 
+import java.awt.datatransfer.SystemFlavorMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -45,6 +47,7 @@ import org.apache.zookeeper.KeeperException.SystemErrorException;
 import com.codahale.metrics.graphite.GraphiteRabbitMQ;
 import com.esotericsoftware.kryo.serializers.DefaultSerializers.CollectionsEmptyListSerializer;
 import com.fasterxml.jackson.dataformat.yaml.snakeyaml.error.YAMLException;
+import com.sun.xml.bind.v2.runtime.property.AttributeProperty;
 
 import breeze.optimize.FirstOrderMinimizer.ConvergenceCheck;
 
@@ -60,56 +63,19 @@ public class NQuadReader {
 		jsc.setLogLevel("ERROR");
 		ClassTag<Object> objectTag = scala.reflect.ClassTag$.MODULE$.apply(Object.class);
 		ClassTag<Relation> relationTag = scala.reflect.ClassTag$.MODULE$.apply(Relation.class);
-		Graph<Object, Relation> quadGraph = GraphGenerator.generateGraph(jsc, objectTag, relationTag);
-
-//		Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc,
-//		objectTag,relationTag,"Level_Importance_All-All","Level_Aircraft_All-All","Level_Location_All-All",
-//		"Level_Date_All-All");		
-
-//		Graph<Object, Relation> mergedGraph =
-//		merge(quadGraph,jsc,"Level_Importance_Package",
-//		"Level_Aircraft_All","Level_Location_Region","Level_Date_Year");
-//		mergedGraph.triplets().toJavaRDD().foreach(x -> System.out.println(x.srcAttr() + " " + x.attr().getRelationship() + " " + x.dstAttr() + " " +x.attr().getContext()));
 		
-//		 Graph<Object, Relation> replaceAreaUsageGraph 
-//		 = replaceByGrouping(quadGraph, jsc, objectTag, relationTag,"ManoeuvringAreaUsage", "usageType");
-//		 replaceAreaUsageGraph.triplets().toJavaRDD().foreach(x ->
-//		 System.out.println(x.srcAttr() + " " + x.attr().getRelationship() + " " + x.dstAttr()));
-		 
-//		Graph<Object, Relation> groupOperationalStatus = groupByProperty(quadGraph, jsc, objectTag, relationTag,
-//				"operationalStatus", "http://example.org/kgolap/object-model#grouping",
-//				"urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod");
-//		groupOperationalStatus.triplets().toJavaRDD().foreach(x ->
-//		 System.out.println(x.srcAttr() + " " + x.attr().getRelationship() + " " + x.dstAttr()));
+		String path = "C:\\Users\\jenniffer\\Dropbox\\Masterarbeit";
+		String fileName = "reification.nq";
+		Graph<Object, Relation> quadGraph = GraphGenerator.generateGraph(jsc, objectTag, relationTag, path, fileName);
 
-
-//		Graph<Object, Relation> pivotLocationGraph = pivotGraph(quadGraph, jsc, objectTag, relationTag, "hasLocation",
-//				"http://example.org/kgolap/object-model#hasLocation", "type",
-//				"http://example.org/kgolap/object-model#ManoeuvringAreaAvailability",
-//				"urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
-
-//		Graph<Object, Relation> reificationUsage = 
-//		reificationGraph(quadGraph, jsc, objectTag, relationTag,"urn:uuid:0acc4b38-168d-4a33-898c-258b89881556-mod", "http://example.org/kgolap/object-model#usage",
-//				"http://example.org/kgolap/object-model#usage-type", "http://www.w3.org/1999/02/22-rdf-syntax-ns#object", "http://www.w3.org/1999/02/22-rdf-syntax-ns#subject");
-//		 reificationUsage.triplets().toJavaRDD().foreach(x -> System.out.println(x.srcAttr() + " " + x.attr().getRelationship().toString() + " " + x.dstAttr() + " " + x.attr().getContext().toString()));
-
-//		 Graph<Object, Relation> replaceAircraftCharacteristics 
-//		 = replaceByGrouping(quadGraph, jsc, objectTag, relationTag,"AircraftCharacteristic", "wingspanInterpretation");
-//		 Graph<Object, Relation> wingspanSum = aggregatePropertyValues(replaceAircraftCharacteristics, jsc, objectTag, relationTag, 
-//				 "http://example.org/kgolap/object-model#wingspan", "<urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod>", "SUM"); 
-//		 wingspanSum.triplets().toJavaRDD().foreach(x -> System.out.println(x.srcAttr() + " " + x.attr().getRelationship().toString() + " " + x.dstAttr() + " " + x.attr().getContext().toString()));
-
-//		 Graph<Object, Relation> replaceAircraftCharacteristics 
-//		 = groupByProperty(quadGraph, jsc, objectTag, relationTag,"http://example.org/kgolap/object-model#wingspanInterpretation", "http://example.org/kgolap/object-model#grouping", "<urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod>");
-//		 //replaceAircraftCharacteristics.triplets().toJavaRDD().foreach(x -> System.out.println(x.srcAttr()+""+x.srcId() + " " + x.attr().getRelationship().toString() + " " + x.dstAttr() + " " + x.attr().getContext().toString()));
-//
-//		 Graph<Object, Relation> wingspanSum = aggregatePropertyValues(replaceAircraftCharacteristics, jsc, objectTag, relationTag, 
-//				 "http://example.org/kgolap/object-model#wingspan", "<urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod>", "SUM"); 
-//		 wingspanSum.triplets().toJavaRDD().foreach(x -> System.out.println(x.srcAttr() + " " + x.attr().getRelationship().toString() + " " + x.dstAttr() + " " + x.attr().getContext().toString()));
-//		 	
+		Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag, relationTag,
+				"Level_Importance_All-All",
+				"Level_Aircraft_All-All",
+				"Level_Location_All-All",
+				"Level_Date_All-All");		 	
 	}
 		
-	private static Graph<Object, Relation> reificationGraph(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+	public static Graph<Object, Relation> reify(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String context, String reificationPredicate, String type, String object, String subject) {
 		
 		JavaRDD<EdgeTriplet<Object, Relation>> statements = 
@@ -157,7 +123,7 @@ public class NQuadReader {
 		return graph;
 	}
 	
-	private static Graph<Object, Relation> pivotGraph(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+	public static Graph<Object, Relation> pivot(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String dimensionProperty, String pivotProperty, String type,
 			String selectionCondition, String context) {
 		Long dimPropertyVertice = quadGraph.triplets().toJavaRDD()
@@ -180,7 +146,7 @@ public class NQuadReader {
 		return graph;
 	}
 	
-	private static Graph<Object, Relation> aggregatePropertyValues(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+	public static Graph<Object, Relation> aggregatePropertyValues(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String aggregateProperty,
 			String mod, String aggregateType) {
 		JavaRDD<Tuple2<Long, Long>> verticesRDD = quadGraph.triplets().toJavaRDD()
@@ -246,7 +212,7 @@ public class NQuadReader {
 		return graph;
 	}	
 	
-	private static Graph<Object, Relation> groupByProperty(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+	public static Graph<Object, Relation> groupByProperty(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String groupingProperty,
 			String groupingPredicate, String mod) {
 
@@ -301,7 +267,7 @@ public class NQuadReader {
 
 	}
 
-	private static Graph<Object, Relation> replaceByGrouping(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+	public static Graph<Object, Relation> replaceByGrouping(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String toBeReplaced, String groupingValue) {
 		// get instances of the type (subjects) that has to be replaced (that hace "toBeReplaced" as object)
@@ -361,30 +327,36 @@ public class NQuadReader {
 		return graph;
 	}
 
-	private static Graph<Object, Relation> merge(Graph<Object, Relation> graph, JavaSparkContext jsc,
-			String levelImportance, String levelAircraft, String levelLocation, String levelDate) {
+	public static Graph<Object, Relation> merge(Graph<Object, Relation> graph, JavaSparkContext jsc,
+			String levelImportance, String levelAircraft, String levelLocation, String levelDate, ClassTag<Object> objectTag, ClassTag<Relation> relationTag) {
 		JavaRDD<Tuple2<Object, Object>> importance = getCellsAtDimensionLevel(graph, "hasImportance", levelImportance, jsc);
 		JavaRDD<Tuple2<Object, Object>> aircraft = getCellsAtDimensionLevel(graph, "hasAircraft", levelAircraft, jsc);
 		JavaRDD<Tuple2<Object, Object>> location = getCellsAtDimensionLevel(graph, "hasLocation", levelLocation, jsc);
 		JavaRDD<Tuple2<Object, Object>> date = getCellsAtDimensionLevel(graph, "hasDate", levelDate, jsc);
 //		// check which cells satisfy all four dimensions
 		JavaRDD<Tuple2<Object, Object>> result = importance.intersection(aircraft).intersection(location).intersection(date);
-		
 		Broadcast<List<Tuple2<Object, Object>>> resultBroadcast = jsc.broadcast(result.collect());
+		List<Edge<Relation>> allEdges = new ArrayList<Edge<Relation>>();
+				allEdges.addAll(graph.edges().toJavaRDD().collect());
 		resultBroadcast.value().forEach(x -> {
-		
 			JavaRDD<String> covered = GraphGenerator.getCoverage(x._2.toString(), jsc).map(z -> z + "-mod");
 			Broadcast<List<String>> coveredBroadcast = jsc.broadcast(covered.collect());
-			graph.triplets().toJavaRDD().foreach(y -> {
-				if (coveredBroadcast.value().contains(y.attr().getContext().toString())) {
-				y.attr().setContext(x._2.toString() + "-mod");
-			}
+			
+			JavaRDD<Edge<Relation>> newEdges = graph.edges().toJavaRDD()
+				.filter(y -> coveredBroadcast.value().contains(y.attr().getContext().toString()))
+				.map(y -> new Edge<Relation>(y.srcId(), y.dstId(), y.attr().updateContext(x._2.toString() + "-mod")));
+			JavaRDD<Edge<Relation>> removeEdges = graph.edges().toJavaRDD()
+					.filter(y -> coveredBroadcast.value().contains(y.attr().getContext().toString()));
+			allEdges.addAll(newEdges.collect());
+			allEdges.removeAll(removeEdges.collect());
 		});
-	});
-		return graph;
+		
+		Graph<Object, Relation> resultGraph  = Graph.apply(graph.vertices().toJavaRDD().rdd(), jsc.parallelize(allEdges).rdd(), "",
+						StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag, relationTag);		
+		return resultGraph;
 	}
 
-	private static JavaRDD<Tuple2<Object, Object>> getVerticesAttributes(Graph<Object, Relation> graph, JavaRDD<Long> ids, JavaSparkContext jsc) {
+	public static JavaRDD<Tuple2<Object, Object>> getVerticesAttributes(Graph<Object, Relation> graph, JavaRDD<Long> ids, JavaSparkContext jsc) {
 		Broadcast<List<Long>> broadcastList = jsc.broadcast(ids.collect());
 
 		JavaRDD<Tuple2<Object, Object>> result = graph.vertices().toJavaRDD().filter(x -> broadcastList.value().contains(x._1)).rdd().toJavaRDD();
@@ -393,9 +365,14 @@ public class NQuadReader {
 	}
 
 
-	private static Graph<Object, Relation> sliceDice(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
+	public static Graph<Object, Relation> sliceDice(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String importanceValue, String aircraftValue,
 			String locationValue, String dateValue) {
+		
+		if(importanceValue=="Level_Importance_All-All" 
+				&& aircraftValue == "Level_Aircraft_All-All"
+				&& locationValue == "Level_Location_All-All"
+				&& dateValue == "Level_Date_All-All") {return quadGraph;}
 
 		JavaRDD<Tuple2<Object, Object>> cellIds = getCellsWithDimValues(quadGraph, jsc, importanceValue, aircraftValue, locationValue,
 				dateValue);
@@ -424,6 +401,7 @@ public class NQuadReader {
 		JavaRDD<Tuple2<Object, Object>> date = getCellsWithDimValueAndCovered(graph, "hasDate", dateValue, jsc);
 		
 		JavaRDD<Tuple2<Object, Object>> result = importance.intersection(aircraft).intersection(location).intersection(date);
+		
 		return result;
 	}
 
@@ -434,15 +412,19 @@ public class NQuadReader {
 		ArrayList<String> coveredInstances = new ArrayList<>();
 		coveredInstances.add(value);
 		JavaRDD<String> instances = jsc.parallelize(coveredInstances);
-
-		Broadcast<List<String>> broadcastInstances = jsc.broadcast(instances.union(GraphGenerator.getCoveredInstances(value, jsc)).collect());
+				
+		if(GraphGenerator.getCoveredInstances(value, jsc) != null) {
+			instances = instances.union(GraphGenerator.getCoveredInstances(value, jsc));
+		}
+		
+		List<String> instanceList =  instances.collect();
 		
 		JavaRDD<Tuple2<Object, Object>> result = graph.triplets().toJavaRDD()
 				.filter(triplet -> 
-					triplet.attr().getRelationship().toString().contains(dimension))
-						 //&& broadcastInstances.value().contains(triplet.dstAttr().toString().subSequence(33, 44)))
+					triplet.attr().getRelationship().toString().contains(dimension)
+						&& triplet.dstAttr().toString().length() >= 45
+						 && instanceList.contains(triplet.dstAttr().toString().subSequence(33, 45)))
 				.map(triplet -> new Tuple2<Object, Object>(triplet.srcId(), triplet.srcAttr()));
-
 		return result;
 	}
 
