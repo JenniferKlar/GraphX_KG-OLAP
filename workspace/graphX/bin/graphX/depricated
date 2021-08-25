@@ -182,3 +182,19 @@
 		
 		return graph;
 	}
+
+	
+		// get all Mods (as String) that belong to the Cells that have the correct
+	// dimensions
+//	private static JavaRDD<String> getMods(Graph<Object, Relation> quadGraph, JavaRDD<Tuple2<Object, Object>> cells, JavaSparkContext jsc) {
+//		// get mods
+//		
+//		cells.foreach(x -> System.out.println(x._1 + " " + x._2));
+//		
+//		Broadcast<List<Long>> broadcastCellIds = jsc.broadcast(cells.map(x -> (long) x._1).collect());
+//		JavaRDD<String> modules = quadGraph.triplets().toJavaRDD()
+//				.filter(x -> x.attr().getRelationship().toString().contains("hasAssertedModule")
+//						&& broadcastCellIds.value().contains(x.srcId())).map(x -> x.dstAttr().toString());
+//		return modules;
+//	}
+	

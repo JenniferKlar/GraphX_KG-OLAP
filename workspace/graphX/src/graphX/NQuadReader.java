@@ -30,6 +30,7 @@ import org.apache.spark.graphx.impl.AggregatingEdgeContext;
 import org.apache.spark.rdd.RDD;
 
 import java.awt.datatransfer.SystemFlavorMap;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -68,11 +69,12 @@ public class NQuadReader {
 		String fileName = "reification.nq";
 		Graph<Object, Relation> quadGraph = GraphGenerator.generateGraph(jsc, objectTag, relationTag, path, fileName);
 
-		Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag, relationTag,
-				"Level_Importance_All-All",
-				"Level_Aircraft_All-All",
-				"Level_Location_All-All",
-				"Level_Date_All-All");		 	
+//		Graph<Object, Relation> sliceDiceGraph = sliceDice(quadGraph, jsc, objectTag, relationTag,
+//				"Level_Importance_All-All",
+//				"Level_Aircraft_All-All",
+//				"Level_Location_All-All",
+//				"Level_Date_All-All");	
+		
 	}
 		
 	public static Graph<Object, Relation> reify(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
@@ -228,27 +230,26 @@ public class NQuadReader {
 				.distinct()
 				.map(x -> new Edge<Relation>(getIdOfObject(x._1), getIdOfObject(x._2), newRelation));
 						
-		JavaRDD<Tuple4<Object, Object, Object, Object>> groups = quadGraph.triplets().toJavaRDD()
+		JavaRDD<Tuple2<Object, Object>> groups = quadGraph.triplets().toJavaRDD()
 				.filter(x -> x.attr().getRelationship().toString().contains(groupingProperty)).distinct()
-				.map(x -> 
-					new Tuple4<Object, Object, Object, Object>(x.srcId(), x.srcAttr(), getIdOfObject(x.dstAttr()+"-Group"), x.dstAttr()+"-Group"));
+				.map(x -> new Tuple2<Object, Object>(x.srcId(), x.dstAttr()+"-Group"));
 		
-		List<Edge<Relation>> edges = new ArrayList<Edge<Relation>>();
-				
+		List<Edge<Relation>> edges = new ArrayList<Edge<Relation>>();		
+		
 		//subjects
-		groups.collect().forEach(x ->{
+		groups.collect().forEach(x -> {
 			JavaRDD<Edge<Relation>> subjectsReplaced = quadGraph.triplets().toJavaRDD()
-			.filter(y -> y.srcId() == (long)x._1()
+			.filter(y -> y.srcId() == (long) x._1()
 			&& !y.attr().getRelationship().toString().contains(groupingProperty)
 			&& !y.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
-			.map(y -> new Edge<Relation>((long) x._3(), y.dstId(), y.attr()));
+			.map(y -> new Edge<Relation>((long) getIdOfObject(x._2()), y.dstId(), y.attr()));
 
 			//objects
 			JavaRDD<Edge<Relation>> objectsReplaced= quadGraph.triplets().toJavaRDD()
 					.filter(y -> y.dstId() == (long)x._1()
 					&& !y.attr().getRelationship().toString().contains(groupingProperty)
 					&& !y.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
-					.map(y -> new Edge<Relation>(y.srcId(), (long) x._3(), y.attr()));			
+					.map(y -> new Edge<Relation>(y.srcId(), (long) getIdOfObject(x._2()), y.attr()));			
 			
 			//Others - tokeep
 			JavaRDD<Edge<Relation>> keepEdges = quadGraph.triplets().toJavaRDD()
@@ -268,7 +269,6 @@ public class NQuadReader {
 	}
 
 	public static Graph<Object, Relation> replaceByGrouping(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
-
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String toBeReplaced, String groupingValue) {
 		// get instances of the type (subjects) that has to be replaced (that hace "toBeReplaced" as object)
 		List<String> subjectsToBeReplaced = quadGraph.triplets().toJavaRDD()
@@ -320,7 +320,7 @@ public class NQuadReader {
 		edgeList.addAll(allEdges);
 		edgeList.removeAll(toBeRemovedEdges);
 		JavaRDD<Edge<Relation>> edges = jsc.parallelize(edgeList);
-
+		
 		Graph<Object, Relation> graph = Graph.apply(quadGraph.vertices().toJavaRDD().rdd(), edges.rdd(), "",
 				StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag, relationTag);
 		
@@ -333,11 +333,14 @@ public class NQuadReader {
 		JavaRDD<Tuple2<Object, Object>> aircraft = getCellsAtDimensionLevel(graph, "hasAircraft", levelAircraft, jsc);
 		JavaRDD<Tuple2<Object, Object>> location = getCellsAtDimensionLevel(graph, "hasLocation", levelLocation, jsc);
 		JavaRDD<Tuple2<Object, Object>> date = getCellsAtDimensionLevel(graph, "hasDate", levelDate, jsc);
-//		// check which cells satisfy all four dimensions
+		// check which cells satisfy all four dimensions		
 		JavaRDD<Tuple2<Object, Object>> result = importance.intersection(aircraft).intersection(location).intersection(date);
+				
 		Broadcast<List<Tuple2<Object, Object>>> resultBroadcast = jsc.broadcast(result.collect());
+		
 		List<Edge<Relation>> allEdges = new ArrayList<Edge<Relation>>();
 				allEdges.addAll(graph.edges().toJavaRDD().collect());
+		
 		resultBroadcast.value().forEach(x -> {
 			JavaRDD<String> covered = GraphGenerator.getCoverage(x._2.toString(), jsc).map(z -> z + "-mod");
 			Broadcast<List<String>> coveredBroadcast = jsc.broadcast(covered.collect());
@@ -345,25 +348,18 @@ public class NQuadReader {
 			JavaRDD<Edge<Relation>> newEdges = graph.edges().toJavaRDD()
 				.filter(y -> coveredBroadcast.value().contains(y.attr().getContext().toString()))
 				.map(y -> new Edge<Relation>(y.srcId(), y.dstId(), y.attr().updateContext(x._2.toString() + "-mod")));
+			
 			JavaRDD<Edge<Relation>> removeEdges = graph.edges().toJavaRDD()
 					.filter(y -> coveredBroadcast.value().contains(y.attr().getContext().toString()));
 			allEdges.addAll(newEdges.collect());
 			allEdges.removeAll(removeEdges.collect());
 		});
+
 		
 		Graph<Object, Relation> resultGraph  = Graph.apply(graph.vertices().toJavaRDD().rdd(), jsc.parallelize(allEdges).rdd(), "",
 						StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag, relationTag);		
 		return resultGraph;
 	}
-
-	public static JavaRDD<Tuple2<Object, Object>> getVerticesAttributes(Graph<Object, Relation> graph, JavaRDD<Long> ids, JavaSparkContext jsc) {
-		Broadcast<List<Long>> broadcastList = jsc.broadcast(ids.collect());
-
-		JavaRDD<Tuple2<Object, Object>> result = graph.vertices().toJavaRDD().filter(x -> broadcastList.value().contains(x._1)).rdd().toJavaRDD();
-		
-		return result;
-	}
-
 
 	public static Graph<Object, Relation> sliceDice(Graph<Object, Relation> quadGraph, JavaSparkContext jsc,
 			ClassTag<Object> objectTag, ClassTag<Relation> relationTag, String importanceValue, String aircraftValue,
@@ -374,16 +370,17 @@ public class NQuadReader {
 				&& locationValue == "Level_Location_All-All"
 				&& dateValue == "Level_Date_All-All") {return quadGraph;}
 
-		JavaRDD<Tuple2<Object, Object>> cellIds = getCellsWithDimValues(quadGraph, jsc, importanceValue, aircraftValue, locationValue,
+		JavaRDD<Tuple2<Object, Object>> cells = getCellsWithDimValues(quadGraph, jsc, importanceValue, aircraftValue, locationValue,
 				dateValue);
-
-		JavaRDD<String> mods = getMods(quadGraph, cellIds, jsc);
+		
+		JavaRDD<String> mods = cells.map(x -> x._2+"-mod");
 		
 		Broadcast<List<String>> broadcastMods = jsc.broadcast(mods.collect());
 		JavaRDD<Edge<Relation>> result = 
 				quadGraph.triplets().toJavaRDD()
 				.filter(x -> broadcastMods.value().contains(x.attr().getContext().toString()) || 
-						x.attr().getContext().toString().contains("global")).map(x -> new Edge<Relation>(x.srcId(), x.dstId(), x.attr()));
+						x.attr().getContext().toString().contains("global"))
+				.map(x -> new Edge<Relation>(x.srcId(), x.dstId(), x.attr()));
 		
 		Graph<Object, Relation> resultGraph = Graph.apply(quadGraph.vertices(),
 				result.rdd(), "", StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag,
@@ -417,42 +414,33 @@ public class NQuadReader {
 			instances = instances.union(GraphGenerator.getCoveredInstances(value, jsc));
 		}
 		
-		List<String> instanceList =  instances.collect();
+		Broadcast<List<String>> instancesBroadcast = jsc.broadcast(instances.collect());
 		
 		JavaRDD<Tuple2<Object, Object>> result = graph.triplets().toJavaRDD()
 				.filter(triplet -> 
 					triplet.attr().getRelationship().toString().contains(dimension)
 						&& triplet.dstAttr().toString().length() >= 45
-						 && instanceList.contains(triplet.dstAttr().toString().subSequence(33, 45)))
+						 && instancesBroadcast.getValue().contains(triplet.dstAttr().toString().subSequence(33, 45)))
 				.map(triplet -> new Tuple2<Object, Object>(triplet.srcId(), triplet.srcAttr()));
 		return result;
-	}
-
-	// get all Mods (as String) that belong to the Cells that have the correct
-	// dimensions
-	private static JavaRDD<String> getMods(Graph<Object, Relation> quadGraph, JavaRDD<Tuple2<Object, Object>> cellIds, JavaSparkContext jsc) {
-		// get mods
-		Broadcast<List<Long>> broadcastCellIds = jsc.broadcast(cellIds.map(x -> (long) x._1).collect());
-		JavaRDD<String> modules = quadGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains("hasAssertedModule")
-						&& broadcastCellIds.value().contains(x.srcId())).map(x -> x.dstAttr().toString());
-		return modules;
 	}
 
 	// get Cells With A Certain Level
 	private static JavaRDD<Tuple2<Object, Object>> getCellsAtDimensionLevel(Graph<Object, Relation> graph, String dimension, String level, JavaSparkContext jsc) {
 				
 		//https://stackoverflow.com/questions/26214112/filter-based-on-another-rdd-in-spark		
-		JavaRDD<Long> aList = graph.triplets().toJavaRDD()
+		//get the objects that are at the correct level
+		JavaRDD<Long> atLevelSubjects = graph.triplets().toJavaRDD()
 						.filter(triplet -> triplet.attr().getRelationship().toString().contains("atLevel")
 								&& triplet.dstAttr().toString().contains(level))
 						.map(triplet -> triplet.srcId());
-		Broadcast<List<Long>> broadcastList = jsc.broadcast(aList.collect());		
 		
-		JavaRDD<EdgeTriplet<Object, Relation>> g = graph.triplets().toJavaRDD()
-				.filter(triplet -> triplet.attr().getRelationship().toString().contains(dimension));
+		Broadcast<List<Long>> broadcastSubjects = jsc.broadcast(atLevelSubjects.collect());
 		
-		JavaRDD<Tuple2<Object, Object>> result = g.filter(x -> broadcastList.getValue().contains(x.dstId())).map(x -> new Tuple2<Object, Object>(x.srcId(), x.srcAttr()));
+		//get the cells that have those objects as dimension values that are at the correct level
+		JavaRDD<Tuple2<Object, Object>> result = 
+				graph.triplets().toJavaRDD().filter(x -> broadcastSubjects.getValue().contains(x.dstId())
+						&& x.attr().getRelationship().toString().contains(dimension)).map(x -> new Tuple2<Object, Object>(x.srcId(), x.srcAttr()));
 		
 		return result;
 	}
