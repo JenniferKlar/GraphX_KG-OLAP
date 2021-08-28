@@ -36,6 +36,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -47,7 +48,6 @@ import org.apache.zookeeper.KeeperException.SystemErrorException;
 
 import com.codahale.metrics.graphite.GraphiteRabbitMQ;
 import com.esotericsoftware.kryo.serializers.DefaultSerializers.CollectionsEmptyListSerializer;
-import com.fasterxml.jackson.dataformat.yaml.snakeyaml.error.YAMLException;
 import com.sun.xml.bind.v2.runtime.property.AttributeProperty;
 
 import breeze.optimize.FirstOrderMinimizer.ConvergenceCheck;
@@ -223,46 +223,47 @@ public class NQuadReader {
 				.map(x -> new Tuple2<Object, Object>(getIdOfObject(x.dstAttr()+"-Group"), x.dstAttr()+"-Group"));
 	
 		Relation newRelation = new Relation(groupingPredicate, mod, "Resource");
+		
+		JavaRDD<EdgeTriplet<Object, Relation>> filteredEdges = quadGraph.triplets().toJavaRDD()
+				.filter(x -> x.attr().getRelationship().toString().contains(groupingProperty));
+		
 		JavaRDD<Edge<Relation>> groupingEdges = 
-				quadGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains(groupingProperty))
-				.map(x -> new Tuple2<Object, Object>(x.srcAttr(), x.dstAttr()+"-Group"))
+				filteredEdges
+				.map(x -> new Tuple2<Object, Object>(x.srcId(), x.dstAttr()+"-Group"))
 				.distinct()
-				.map(x -> new Edge<Relation>(getIdOfObject(x._1), getIdOfObject(x._2), newRelation));
+				.map(x -> new Edge<Relation>((long) x._1, getIdOfObject(x._2), newRelation));
 						
-		JavaRDD<Tuple2<Object, Object>> groups = quadGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains(groupingProperty)).distinct()
-				.map(x -> new Tuple2<Object, Object>(x.srcId(), x.dstAttr()+"-Group"));
+		HashMap<Object, Object> hashmap = new HashMap<Object, Object>();
 		
-		List<Edge<Relation>> edges = new ArrayList<Edge<Relation>>();		
-		
-		//subjects
-		groups.collect().forEach(x -> {
-			JavaRDD<Edge<Relation>> subjectsReplaced = quadGraph.triplets().toJavaRDD()
-			.filter(y -> y.srcId() == (long) x._1()
-			&& !y.attr().getRelationship().toString().contains(groupingProperty)
-			&& !y.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
-			.map(y -> new Edge<Relation>((long) getIdOfObject(x._2()), y.dstId(), y.attr()));
+		filteredEdges
+		.map(x -> new Tuple2<Object, Object>(x.srcId(), x.dstAttr()+"-Group"))
+		.collect().forEach(x -> hashmap.put(x._1, getIdOfObject(x._2)));	
+			
+		Broadcast<HashMap<Object, Object>> groupMapping = jsc.broadcast(hashmap);
 
-			//objects
-			JavaRDD<Edge<Relation>> objectsReplaced= quadGraph.triplets().toJavaRDD()
-					.filter(y -> y.dstId() == (long)x._1()
-					&& !y.attr().getRelationship().toString().contains(groupingProperty)
-					&& !y.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
-					.map(y -> new Edge<Relation>(y.srcId(), (long) getIdOfObject(x._2()), y.attr()));			
-			
-			//Others - tokeep
-			JavaRDD<Edge<Relation>> keepEdges = quadGraph.triplets().toJavaRDD()
-				.filter(y -> y.srcId() != (long)x._1() && y.dstId() != (long) x._1()
-				&& y.attr().getRelationship().toString().contains(groupingProperty)
-				|| y.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
-				.map(y -> new Edge<Relation>(y.srcId(), y.dstId(), y.attr()));
-			
-			edges.addAll(subjectsReplaced.union(objectsReplaced).union(keepEdges).collect());
-			});
-			
+		JavaRDD<Edge<Relation>> subjectsReplaced = quadGraph.triplets().toJavaRDD()
+				.filter(x -> groupMapping.value().containsKey(x.srcId())
+				&& !x.attr().getRelationship().toString().contains(groupingProperty)
+				&& !x.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
+				.map(x -> 
+				new Edge<Relation>((long) groupMapping.value().get(x.srcId()), x.dstId(), x.attr()));
+				
+		JavaRDD<Edge<Relation>> objectsReplaced = quadGraph.triplets().toJavaRDD()
+				.filter(x -> groupMapping.value().containsKey(x.dstId())
+				&& !x.attr().getRelationship().toString().contains(groupingProperty)
+				&& !x.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
+				.map(x -> new Edge<Relation>(x.srcId(), (long) groupMapping.value().get(x.dstId()), x.attr()));
+
+		JavaRDD<Edge<Relation>> keepEdges = 
+				quadGraph.triplets().toJavaRDD()
+				.filter(x -> !groupMapping.value().containsKey(x.srcId()) && !groupMapping.value().containsKey(x.dstId())
+				|| x.attr().getRelationship().toString().contains(groupingProperty)
+				|| x.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
+				.map(x -> new Edge<Relation>(x.srcId(), x.dstId(), x.attr()));		
+		
+		
 		Graph<Object, Relation> graph = Graph.apply(quadGraph.vertices().union(newVertices.rdd()).distinct(),
-				jsc.parallelize(edges).rdd().union(groupingEdges.rdd()).distinct(), "", StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag,
+				subjectsReplaced.union(objectsReplaced).union(keepEdges).union(groupingEdges).rdd(), "", StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag,
 				relationTag);
 		return graph;
 
@@ -274,54 +275,39 @@ public class NQuadReader {
 		List<String> subjectsToBeReplaced = quadGraph.triplets().toJavaRDD()
 				.filter(x -> x.dstAttr().toString().contains(toBeReplaced)).map(x -> x.srcAttr().toString()).collect();
 		
-		Set<Edge<Relation>> allEdges = new LinkedHashSet<Edge<Relation>>();
-		Set<Edge<Relation>> toBeRemovedEdges = new LinkedHashSet<Edge<Relation>>();
-
-		subjectsToBeReplaced.forEach(x -> {
-			List<Edge<Relation>> newTriplets = new ArrayList<>();
-			List<Edge<Relation>> removeTriplets = new ArrayList<>();
-
-			//get the grouping object that should replace the current subject
-			List<String> grouping = quadGraph.triplets().toJavaRDD()
-					.filter(y -> y.srcAttr().toString().contains(x)
-							&& y.attr().getRelationship().toString().contains(groupingValue))
-					.map(y -> y.dstAttr().toString()).collect();
-			
-			//get the ID of this object that should replace the subject
-			Long groupingId = getIdOfObject(grouping.get(0));
-
-			//new triples to add to the graph (with object that replaces the current subject, not type, not groupingValue
-			newTriplets.addAll(quadGraph.triplets().toJavaRDD()
-					.filter(y -> y.srcAttr().toString().contains(x)
-							&& !y.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
-							&& !y.attr().getRelationship().toString().contains(groupingValue))
-					.map(y -> new Edge<Relation>((long) groupingId, y.dstId(), y.attr())).collect());
-			
-			//add new triplets where object is replaced
-			newTriplets.addAll(quadGraph.triplets().toJavaRDD()
-					.filter(y -> y.dstAttr().toString().contains(x)
-							&& !y.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
-							&& !y.attr().getRelationship().toString().contains(groupingValue))
-					.map(y -> new Edge<Relation>(y.srcId(), (long) groupingId, y.attr())).collect());
-			allEdges.addAll(newTriplets);
-			
-			// triples to be removed - subject + object
-			removeTriplets = quadGraph.triplets().toJavaRDD()
-					.filter(y -> (y.srcAttr().toString().contains(x) || y.dstAttr().toString().contains(x))
-							&& !y.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
-							&& !y.attr().getRelationship().toString().contains(groupingValue))
-					.map(y -> new Edge<Relation>(y.srcId(), y.dstId(), y.attr())).collect();
-			toBeRemovedEdges.addAll(removeTriplets);
-		});
+		Broadcast<List<String>> broadcastSubjectsToBeReplaced = jsc.broadcast(subjectsToBeReplaced);
+		HashMap<Object, Object> hashmap = new HashMap<Object, Object>();
 		
-		List<Edge<Relation>> edgeList = new ArrayList<Edge<Relation>>();
-
-		edgeList.addAll(quadGraph.edges().toJavaRDD().collect());
-		edgeList.addAll(allEdges);
-		edgeList.removeAll(toBeRemovedEdges);
-		JavaRDD<Edge<Relation>> edges = jsc.parallelize(edgeList);
+		JavaRDD<EdgeTriplet<Object, Relation>> groups = quadGraph.triplets().toJavaRDD()
+		.filter(x -> broadcastSubjectsToBeReplaced.value().contains(x.srcAttr().toString())
+				&& x.attr().getRelationship().toString().contains(groupingValue));
 		
-		Graph<Object, Relation> graph = Graph.apply(quadGraph.vertices().toJavaRDD().rdd(), edges.rdd(), "",
+		groups.collect().forEach(x -> hashmap.put(x.srcId(), x.dstId()));
+		Broadcast<HashMap<Object, Object>> groupMapping = jsc.broadcast(hashmap);
+		
+		//new triples to add to the graph (with object that replaces the current subject, not type, not groupingValue
+		JavaRDD<Edge<Relation>> subjectsReplaced = quadGraph.triplets().toJavaRDD()
+				.filter(x -> groupMapping.value().containsKey(x.srcId())
+						&& !x.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
+						&& !x.attr().getRelationship().toString().contains(groupingValue))
+				.map(x -> new Edge<Relation>((long) groupMapping.value().get(x.srcId()), x.dstId(), x.attr()));
+		
+		//add new triplets where object is replaced
+		JavaRDD<Edge<Relation>> objectsReplaced = quadGraph.triplets().toJavaRDD()
+				.filter(x -> groupMapping.value().containsKey(x.dstId())
+						&& !x.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
+						&& !x.attr().getRelationship().toString().contains(groupingValue))
+				.map(x -> new Edge<Relation>(x.srcId(), (long) groupMapping.value().get(x.dstId()), x.attr()));
+		
+		JavaRDD<Edge<Relation>> keepEdges = 
+				quadGraph.triplets().toJavaRDD()
+				.filter(x -> !groupMapping.value().containsKey(x.srcId()) && !groupMapping.value().containsKey(x.dstId())
+				|| x.attr().getRelationship().toString().contains(groupingValue)
+				|| x.attr().getRelationship().toString().contains("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"))
+				.map(x -> new Edge<Relation>(x.srcId(), x.dstId(), x.attr()));
+
+		Graph<Object, Relation> graph = Graph.apply(quadGraph.vertices().toJavaRDD().rdd(), subjectsReplaced.union(objectsReplaced)
+				.union(keepEdges).rdd(), "",
 				StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), objectTag, relationTag);
 		
 		return graph;

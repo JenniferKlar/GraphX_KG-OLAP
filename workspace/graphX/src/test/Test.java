@@ -51,7 +51,6 @@ public class Test {
 				"Level_Aircraft_All-All",
 				"Level_Location_All-All",
 				"Level_Date_All-All");
-		System.out.println("______________");
 		Assert.assertEquals(graph.triplets().count(), graph2.triplets().count());
 		
 	}
@@ -65,8 +64,6 @@ public class Test {
 				"c82c7d6ae614",
 				"8663b59fe537",
 				"Level_Date_All-All");
-		graph.triplets().toJavaRDD().foreach(x -> System.out.println(x.attr().getContext()));
-		graph2.triplets().toJavaRDD().foreach(x -> System.out.println(x.attr().getContext()));
 		
 		Assert.assertNotEquals(graph.triplets().count(), graph2.triplets().count());
 		
@@ -149,7 +146,7 @@ public class Test {
 		Graph<Object, Relation> resultGraph = NQuadReader.groupByProperty(graph, jsc, objectTag, relationTag,
 		"operationalStatus", "http://example.org/kgolap/object-model#grouping",
 		"urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod");
-		
+
 		long groupingCount = resultGraph.triplets().toJavaRDD()
 				.filter(x -> x.attr().getRelationship().toString().contains("http://example.org/kgolap/object-model#grouping")
 						&& x.dstAttr().toString().contains("-Group")).count();
