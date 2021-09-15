@@ -12,9 +12,8 @@ import graphX.NQuadReader;
 import graphX.Relation;
 import scala.reflect.ClassTag;
 
-
 public class Test {
-	
+
 	ClassTag<Object> objectTag = scala.reflect.ClassTag$.MODULE$.apply(Object.class);
 	ClassTag<Relation> relationTag = scala.reflect.ClassTag$.MODULE$.apply(Relation.class);
 	String path = "C:\\Users\\jenniffer\\Dropbox\\Masterarbeit";
@@ -22,24 +21,27 @@ public class Test {
 	SparkConf sparkConf = new SparkConf().setAppName("NQuadReader").setMaster("local[*]")
 			.set("spark.executor.memory", "2g").set("spark.executor.cores", "1")
 			.set("spark.dynamicAllocation.enabled", "true")
-			.set("spark.serializer", "org.apache.spark.serializer.JavaSerializer");
-	
+			.set("spark.serializer", "org.apache.spark.serializer.JavaSerializer")
+			.set("spark.eventLog.enabled", "true");
 	JavaSparkContext jsc = new JavaSparkContext(sparkConf);
-	
-	@Before public void setLogLevel(){
+
+	@Before
+	public void setLogLevel() {
 		this.jsc.setLogLevel("ERROR");
 	}
-	
-	@After public void shutDownJSC() {
+
+	@After
+	public void shutDownJSC() {
 		jsc.close();
 	}
-	
+
 	@org.junit.Test
 	public void testGraphGenerator() {
 		String fileName = "generateGraph.nq";
 		Graph<Object, Relation> graph = GraphGenerator.generateGraph(jsc, objectTag, relationTag, path, fileName);
 		Assert.assertEquals(graph.vertices().count(), 7);
 		Assert.assertEquals(graph.edges().count(), 6);
+		
 	}
 	
 	@org.junit.Test
@@ -68,17 +70,17 @@ public class Test {
 		Assert.assertNotEquals(graph.triplets().count(), graph2.triplets().count());
 		
 	}
-	
+
 	@org.junit.Test
 	public void testMerge() {
 		String fileName = "merge.nq";
 		Graph<Object, Relation> graph = GraphGenerator.generateGraph(jsc, objectTag, relationTag, path, fileName);
 
 		Graph<Object, Relation> mergedGraph = NQuadReader.merge(graph, jsc, "Level_Importance_Package","Level_Aircraft_All","Level_Location_Region","Level_Date_Year", objectTag, relationTag);
-		
+				
 		long count1 = graph.edges().toJavaRDD().map(x -> x.attr().getContext().toString()).distinct().count();
 		long count2 = mergedGraph.edges().toJavaRDD().map(x -> x.attr().getContext().toString()).distinct().count();
-				
+
 		Assert.assertNotEquals(count1, count2);
 		Assert.assertEquals(7, count1);
 		Assert.assertEquals(4, count2);
@@ -142,24 +144,24 @@ public class Test {
 	public void testGroupByProperty() {
 		String fileName = "groupByProperty.nq";
 		Graph<Object, Relation> graph = GraphGenerator.generateGraph(jsc, objectTag, relationTag, path, fileName);
-		
+
 		Graph<Object, Relation> resultGraph = NQuadReader.groupByProperty(graph, jsc, objectTag, relationTag,
-		"operationalStatus", "http://example.org/kgolap/object-model#grouping",
-		"urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod");
+				"operationalStatus", "http://example.org/kgolap/object-model#grouping",
+				"urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod");
 
 		long groupingCount = resultGraph.triplets().toJavaRDD()
-				.filter(x -> x.attr().getRelationship().toString().contains("http://example.org/kgolap/object-model#grouping")
-						&& x.dstAttr().toString().contains("-Group")).count();
-		
+				.filter(x -> x.attr().getRelationship().toString().contains(
+						"http://example.org/kgolap/object-model#grouping") && x.dstAttr().toString().contains("-Group"))
+				.count();
+
 		Assert.assertNotEquals(resultGraph, graph);
 		Assert.assertEquals(6, groupingCount);
-		
+
 		long groupCountDistinct = resultGraph.triplets().toJavaRDD()
-				.filter(x -> x.srcAttr().toString().contains("-Group"))
-				.map(x -> x.srcId()).distinct().count();
+				.filter(x -> x.srcAttr().toString().contains("-Group")).map(x -> x.srcId()).distinct().count();
 		Assert.assertEquals(3, groupCountDistinct);
 	}
-	
+
 	@org.junit.Test
 	public void testReplaceByGrouping() {
 		String fileName = "replaceByGrouping.nq";

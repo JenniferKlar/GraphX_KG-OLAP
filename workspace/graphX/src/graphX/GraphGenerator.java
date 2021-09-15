@@ -29,39 +29,63 @@ public class GraphGenerator {
 			ClassTag<Relation> edgeTag, String path, String fileName) {
 
 		JavaRDD<Quad> javaRDD = getJavaRDD(path, fileName, jsc);
-				
-		JavaRDD<Tuple2<Object, Object>> vertices = javaRDD.map(x -> (Object) new Resource(x.getSubject().toString()))
-		.union(javaRDD.filter(x -> x.getObject().isLiteral()).map(x -> x.getObject().getLiteralValue().toString()))
-		.union(javaRDD.filter(x -> !x.getObject().isLiteral()).map(x -> new Resource(x.getObject().toString()))).distinct()
-		.map(x -> new Tuple2<Object, Object>(UUID.nameUUIDFromBytes(x.toString().getBytes()).getMostSignificantBits(), x));
-		
+
+		JavaRDD<Tuple2<Object, Object>> vertices = 
+				javaRDD.map(x -> (Object) new Resource(x.getSubject().toString()))
+				.union(
+						javaRDD.map(x -> 
+						{if(x.getObject().isLiteral()){return x.getObject().getLiteralValue().toString();}
+						else {return new Resource(x.getObject().toString());}
+						}))
+				.map(x -> new Tuple2<Object, Object>(UUID.nameUUIDFromBytes(x.toString().getBytes()).getMostSignificantBits(), x));
+
 		// all Objects that are Literals
-		JavaRDD<Edge<Relation>> literalEdges = javaRDD.filter(x -> x.getObject().isLiteral())
-				.map(x -> 
-				new Edge<Relation>(UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
-						UUID.nameUUIDFromBytes(x.getObject().getLiteralValue().toString().getBytes()).getMostSignificantBits(),
-						new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
-								x.getObject().getLiteralDatatype().getJavaClass().getSimpleName().toString())));
+		JavaRDD<Edge<Relation>> edges = 
+				javaRDD.map(x -> {
+					if(x.getObject().isLiteral()) {
+						return new Edge<Relation>(
+								UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
+								UUID.nameUUIDFromBytes(x.getObject().getLiteralValue().toString().getBytes())
+										.getMostSignificantBits(),
+								new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
+										x.getObject().getLiteralDatatype().getJavaClass().getSimpleName().toString())); }
+					else {
+						return new Edge<Relation>(
+										UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
+										UUID.nameUUIDFromBytes(new Resource(x.getObject().toString()).toString().getBytes())
+												.getMostSignificantBits(),
+										new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
+												"Resource")); }		
+					});
+				
+//				javaRDD.filter(x -> x.getObject().isLiteral())
+//				.map(x -> new Edge<Relation>(
+//						UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
+//						UUID.nameUUIDFromBytes(x.getObject().getLiteralValue().toString().getBytes())
+//								.getMostSignificantBits(),
+//						new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
+//								x.getObject().getLiteralDatatype().getJavaClass().getSimpleName().toString())));
 
 		// all Objects that are Resources
-		JavaRDD<Edge<Relation>> resourceEdges = javaRDD.filter(x -> !x.getObject().isLiteral())
-				.map(x -> 
-				new Edge<Relation>(UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
-						UUID.nameUUIDFromBytes(new Resource(x.getObject().toString()).toString().getBytes()).getMostSignificantBits(),
-						new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
-								"Resource")));
-
-		JavaRDD<Edge<Relation>> quadEdgeRDD = literalEdges.union(resourceEdges);
-		Graph<Object, Relation> quadGraph = Graph.apply(vertices.rdd(), quadEdgeRDD.rdd(), "",
+//		JavaRDD<Edge<Relation>> resourceEdges = javaRDD.filter(x -> !x.getObject().isLiteral())
+//				.map(x -> new Edge<Relation>(
+//						UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
+//						UUID.nameUUIDFromBytes(new Resource(x.getObject().toString()).toString().getBytes())
+//								.getMostSignificantBits(),
+//						new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
+//								"Resource")));
+//
+//		JavaRDD<Edge<Relation>> quadEdgeRDD = literalEdges.union(resourceEdges);
+		Graph<Object, Relation> quadGraph = Graph.apply(vertices.rdd(), edges.rdd(), "",
 				StorageLevel.MEMORY_ONLY(), StorageLevel.MEMORY_ONLY(), vertexTag, edgeTag);
 
 		return quadGraph;
 	}
 
 	// get JavaRDD from n-quad file
-	private static JavaRDD<Quad> getJavaRDD(String path, String fileName,JavaSparkContext jsc) {
+	private static JavaRDD<Quad> getJavaRDD(String path, String fileName, JavaSparkContext jsc) {
 
-		JavaRDD<Quad> javaRDD = jsc.textFile(path + "\\"+ fileName).filter(line -> !line.startsWith("#"))
+		JavaRDD<Quad> javaRDD = jsc.textFile(path + "\\" + fileName).filter(line -> !line.startsWith("#"))
 				.filter(line -> !line.isEmpty() || line.length() != 0).map(line -> RDFDataMgr
 						.createIteratorQuads(new ByteArrayInputStream(line.getBytes()), Lang.NQUADS, null).next());
 		javaRDD.persist(StorageLevel.MEMORY_AND_DISK());
@@ -410,7 +434,501 @@ public class GraphGenerator {
 	}
 
 	// returns all covered mods for specified mod
-	 static List<String> getCoverageList(String mod) {
+	static HashMap<String, String> getCoverageHashMap(List<String> mods) {
+		HashMap<String, HashMap<String, String>> coverageMap = new HashMap<String, HashMap<String, String>>();
+		HashMap<String, String> covers = new HashMap<String, String>();
+		covers.put("urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:841014a7-ff74-4b40-8b3f-a9b083e1339d-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:f94f180d-f09a-4a8e-b1c4-a75d48d56949-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:0384c6cf-e18c-426c-b707-0fa44383a2a3-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:f051dba7-93df-429b-a730-f34d4ea1b522-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:8f7314f1-b7b6-434c-a8ac-b161809a66fe-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:8ab12162-5a0c-4223-a5a7-83b2aecd824d-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:c21e3593-f034-47ce-8cd5-6de6688001a3-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:2e936993-75e9-43f6-b272-137e535d1210-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:4f4b5d37-8742-4d58-86fc-f7465328e8a8-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:b51f0edd-d182-4bc0-adc6-6a1813fb8a1e-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:425a08e3-7def-4a14-b68c-fbca41ad1dfb-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:b9bd92c1-bab6-495a-9b07-cf887c2ba971-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:8bc6bdeb-f30b-4f24-9f2c-8045135dc5f4-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		covers.put("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e-mod",
+				"urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod");
+		coverageMap.put("urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb", covers);
+
+		HashMap<String, String> covers2 = new HashMap<String, String>();
+		covers2.put("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:841014a7-ff74-4b40-8b3f-a9b083e1339d-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:f94f180d-f09a-4a8e-b1c4-a75d48d56949-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:0384c6cf-e18c-426c-b707-0fa44383a2a3-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:f051dba7-93df-429b-a730-f34d4ea1b522-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:8f7314f1-b7b6-434c-a8ac-b161809a66fe-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:8ab12162-5a0c-4223-a5a7-83b2aecd824d-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:c21e3593-f034-47ce-8cd5-6de6688001a3-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:2e936993-75e9-43f6-b272-137e535d1210-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		covers2.put("urn:uuid:4f4b5d37-8742-4d58-86fc-f7465328e8a8-mod",
+				"urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
+		coverageMap.put("urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a", covers2);
+
+		HashMap<String, String> covers3 = new HashMap<String, String>();
+		covers3.put("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:841014a7-ff74-4b40-8b3f-a9b083e1339d-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:f94f180d-f09a-4a8e-b1c4-a75d48d56949-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		covers3.put("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552-mod",
+				"urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
+		coverageMap.put("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a", covers3);
+
+		HashMap<String, String> covers4 = new HashMap<String, String>();
+		covers4.put("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357-mod",
+				"urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod");
+		covers4.put("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod",
+				"urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod");
+		covers4.put("urn:uuid:841014a7-ff74-4b40-8b3f-a9b083e1339d-mod",
+				"urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod");
+		covers4.put("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1-mod",
+				"urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod");
+		covers4.put("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4-mod",
+				"urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod");
+		covers4.put("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957-mod",
+				"urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod");
+		coverageMap.put("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883", covers4);
+
+		HashMap<String, String> covers5 = new HashMap<String, String>();
+		covers5.put("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787-mod",
+				"urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod");
+		covers5.put("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176-mod",
+				"urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod");
+		covers5.put("urn:uuid:f94f180d-f09a-4a8e-b1c4-a75d48d56949-mod",
+				"urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod");
+		covers5.put("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d-mod",
+				"urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod");
+		covers5.put("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f-mod",
+				"urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod");
+		covers5.put("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552-mod",
+				"urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod");
+		coverageMap.put("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4", covers5);
+
+		HashMap<String, String> covers6 = new HashMap<String, String>();
+		covers6.put("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod",
+				"urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod");
+		covers6.put("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678-mod",
+				"urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod");
+		covers6.put("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556-mod",
+				"urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod");
+		covers6.put("urn:uuid:0384c6cf-e18c-426c-b707-0fa44383a2a3-mod",
+				"urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod");
+		covers6.put("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc-mod",
+				"urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod");
+		covers6.put("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod",
+				"urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod");
+		covers6.put("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f-mod",
+				"urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod");
+		coverageMap.put("urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49", covers6);
+
+		HashMap<String, String> covers7 = new HashMap<String, String>();
+		covers7.put("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678-mod",
+				"urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
+		covers7.put("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556-mod",
+				"urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
+		covers7.put("urn:uuid:0384c6cf-e18c-426c-b707-0fa44383a2a3-mod",
+				"urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
+		covers7.put("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc-mod",
+				"urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
+		covers7.put("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod",
+				"urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
+		covers7.put("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f-mod",
+				"urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
+		coverageMap.put("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d", covers7);
+
+		HashMap<String, String> covers8 = new HashMap<String, String>();
+		covers7.put("urn:uuid:f051dba7-93df-429b-a730-f34d4ea1b522-mod",
+				"urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod");
+		covers7.put("urn:uuid:8f7314f1-b7b6-434c-a8ac-b161809a66fe-mod",
+				"urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod");
+		covers7.put("urn:uuid:8ab12162-5a0c-4223-a5a7-83b2aecd824d-mod",
+				"urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod");
+		covers7.put("urn:uuid:c21e3593-f034-47ce-8cd5-6de6688001a3-mod",
+				"urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod");
+		covers7.put("urn:uuid:2e936993-75e9-43f6-b272-137e535d1210-mod",
+				"urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod");
+		covers7.put("urn:uuid:4f4b5d37-8742-4d58-86fc-f7465328e8a8-mod",
+				"urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod");
+		coverageMap.put("urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d", covers8);
+
+		HashMap<String, String> covers9 = new HashMap<String, String>();
+		covers9.put("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:b51f0edd-d182-4bc0-adc6-6a1813fb8a1e-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:425a08e3-7def-4a14-b68c-fbca41ad1dfb-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:b9bd92c1-bab6-495a-9b07-cf887c2ba971-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:8bc6bdeb-f30b-4f24-9f2c-8045135dc5f4-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		covers9.put("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e-mod",
+				"urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod");
+		coverageMap.put("urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a", covers9);
+
+		HashMap<String, String> covers10 = new HashMap<String, String>();
+		covers10.put("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:b51f0edd-d182-4bc0-adc6-6a1813fb8a1e-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:425a08e3-7def-4a14-b68c-fbca41ad1dfb-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		covers10.put("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a-mod",
+				"urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
+		coverageMap.put("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365", covers10);
+
+		HashMap<String, String> covers11 = new HashMap<String, String>();
+		covers11.put("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29-mod",
+				"urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod");
+		covers11.put("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a-mod",
+				"urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod");
+		covers11.put("urn:uuid:b51f0edd-d182-4bc0-adc6-6a1813fb8a1e-mod",
+				"urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod");
+		covers11.put("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6-mod",
+				"urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod");
+		covers11.put("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e-mod",
+				"urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod");
+		covers11.put("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62-mod",
+				"urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod");
+		coverageMap.put("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889", covers11);
+
+		HashMap<String, String> covers12 = new HashMap<String, String>();
+		covers12.put("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc-mod",
+				"urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod");
+		covers12.put("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512-mod",
+				"urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod");
+		covers12.put("urn:uuid:425a08e3-7def-4a14-b68c-fbca41ad1dfb-mod",
+				"urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod");
+		covers12.put("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059-mod",
+				"urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod");
+		covers12.put("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566-mod",
+				"urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod");
+		covers12.put("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a-mod",
+				"urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod");
+		coverageMap.put("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f", covers12);
+
+		HashMap<String, String> covers13 = new HashMap<String, String>();
+		covers13.put("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:b9bd92c1-bab6-495a-9b07-cf887c2ba971-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:8bc6bdeb-f30b-4f24-9f2c-8045135dc5f4-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		covers13.put("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e-mod",
+				"urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod");
+		coverageMap.put("urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea", covers13);
+
+		HashMap<String, String> covers14 = new HashMap<String, String>();
+		covers14.put("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823-mod",
+				"urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod");
+		covers14.put("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386-mod",
+				"urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod");
+		covers14.put("urn:uuid:b9bd92c1-bab6-495a-9b07-cf887c2ba971-mod",
+				"urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod");
+		covers14.put("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7-mod",
+				"urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod");
+		covers14.put("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68-mod",
+				"urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod");
+		covers14.put("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a-mod",
+				"urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod");
+		coverageMap.put("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e", covers14);
+
+		HashMap<String, String> covers15 = new HashMap<String, String>();
+		covers15.put("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51-mod",
+				"urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod");
+		covers15.put("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe-mod",
+				"urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod");
+		covers15.put("urn:uuid:8bc6bdeb-f30b-4f24-9f2c-8045135dc5f4-mod",
+				"urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod");
+		covers15.put("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3-mod",
+				"urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod");
+		covers15.put("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd-mod",
+				"urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod");
+		covers15.put("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e-mod",
+				"urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod");
+		coverageMap.put("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab", covers15);
+
+		HashMap<String, String> resultMap = new HashMap<String, String>();
+		mods.forEach(x -> {
+			resultMap.putAll(coverageMap.get(x.toString()));
+		});
+
+		return resultMap;
+	}
+
+	// returns all covered mods for specified mod
+	static List<String> getCoverage(String mod) {
 		HashMap<String, List<String>> coverageMap = new HashMap<String, List<String>>();
 		ArrayList<String> covers = new ArrayList<>();
 		covers.add("urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod");
@@ -475,7 +993,8 @@ public class GraphGenerator {
 		covers.add("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3-mod");
 		covers.add("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd-mod");
 		covers.add("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e-mod");
-		coverageMap.put("urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb", covers);
+		// JavaRDD<String> rdd = jsc.parallelize(covers);
+		coverageMap.put("urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb-mod", covers);
 		ArrayList<String> covers2 = new ArrayList<>();
 		covers2.add("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod");
 		covers2.add("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod");
@@ -507,7 +1026,8 @@ public class GraphGenerator {
 		covers2.add("urn:uuid:c21e3593-f034-47ce-8cd5-6de6688001a3-mod");
 		covers2.add("urn:uuid:2e936993-75e9-43f6-b272-137e535d1210-mod");
 		covers2.add("urn:uuid:4f4b5d37-8742-4d58-86fc-f7465328e8a8-mod");
-		coverageMap.put("urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a", covers);
+		// JavaRDD<String> rdd2 = jsc.parallelize(covers2);
+		coverageMap.put("urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a-mod", covers2);
 		ArrayList<String> covers3 = new ArrayList<>();
 		covers3.add("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod");
 		covers3.add("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357-mod");
@@ -523,7 +1043,8 @@ public class GraphGenerator {
 		covers3.add("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d-mod");
 		covers3.add("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f-mod");
 		covers3.add("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552-mod");
-		coverageMap.put("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a", covers3);
+		// JavaRDD<String> rdd3 = jsc.parallelize(covers3);
+		coverageMap.put("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a-mod", covers3);
 		ArrayList<String> covers4 = new ArrayList<>();
 		covers4.add("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357-mod");
 		covers4.add("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86-mod");
@@ -531,8 +1052,9 @@ public class GraphGenerator {
 		covers4.add("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1-mod");
 		covers4.add("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4-mod");
 		covers4.add("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957-mod");
-		coverageMap.put("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883", covers4);
-		
+		// JavaRDD<String> rdd4 = jsc.parallelize(covers4);
+		coverageMap.put("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883-mod", covers4);
+
 		ArrayList<String> covers5 = new ArrayList<>();
 		covers5.add("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787-mod");
 		covers5.add("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176-mod");
@@ -540,8 +1062,9 @@ public class GraphGenerator {
 		covers5.add("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d-mod");
 		covers5.add("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f-mod");
 		covers5.add("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552-mod");
-		coverageMap.put("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4", covers5);
-		
+		// JavaRDD<String> rdd5 = jsc.parallelize(covers5);
+		coverageMap.put("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4-mod", covers5);
+
 		ArrayList<String> covers6 = new ArrayList<>();
 		covers6.add("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod");
 		covers6.add("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678-mod");
@@ -551,8 +1074,9 @@ public class GraphGenerator {
 		covers6.add("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod");
 		covers6.add("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f-mod");
 
-		coverageMap.put("urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49", covers6);
-		
+		// JavaRDD<String> rdd6 = jsc.parallelize(covers6);
+		coverageMap.put("urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49-mod", covers6);
+
 		ArrayList<String> covers7 = new ArrayList<>();
 		covers7.add("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678-mod");
 		covers7.add("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556-mod");
@@ -560,8 +1084,9 @@ public class GraphGenerator {
 		covers7.add("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc-mod");
 		covers7.add("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b-mod");
 		covers7.add("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f-mod");
-		coverageMap.put("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d", covers7);
-		
+		// JavaRDD<String> rdd7 = jsc.parallelize(covers7);
+		coverageMap.put("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d-mod", covers7);
+
 		ArrayList<String> covers8 = new ArrayList<>();
 		covers7.add("urn:uuid:f051dba7-93df-429b-a730-f34d4ea1b522-mod");
 		covers7.add("urn:uuid:8f7314f1-b7b6-434c-a8ac-b161809a66fe-mod");
@@ -569,8 +1094,9 @@ public class GraphGenerator {
 		covers7.add("urn:uuid:c21e3593-f034-47ce-8cd5-6de6688001a3-mod");
 		covers7.add("urn:uuid:2e936993-75e9-43f6-b272-137e535d1210-mod");
 		covers7.add("urn:uuid:4f4b5d37-8742-4d58-86fc-f7465328e8a8-mod");
-		coverageMap.put("urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d", covers8);				
-		
+		// JavaRDD<String> rdd8 = jsc.parallelize(covers8);
+		coverageMap.put("urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d-mod", covers8);
+
 		ArrayList<String> covers9 = new ArrayList<>();
 		covers9.add("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod");
 		covers9.add("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod");
@@ -602,8 +1128,9 @@ public class GraphGenerator {
 		covers9.add("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3-mod");
 		covers9.add("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd-mod");
 		covers9.add("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e-mod");
-		coverageMap.put("urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a", covers9);		
-		
+		// JavaRDD<String> rdd9 = jsc.parallelize(covers9);
+		coverageMap.put("urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a-mod", covers9);
+
 		ArrayList<String> covers10 = new ArrayList<>();
 		covers10.add("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod");
 		covers10.add("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29-mod");
@@ -619,8 +1146,9 @@ public class GraphGenerator {
 		covers10.add("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059-mod");
 		covers10.add("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566-mod");
 		covers10.add("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a-mod");
-		coverageMap.put("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365", covers10);
-		
+		// JavaRDD<String> rdd10 = jsc.parallelize(covers10);
+		coverageMap.put("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365-mod", covers10);
+
 		ArrayList<String> covers11 = new ArrayList<>();
 		covers11.add("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29-mod");
 		covers11.add("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a-mod");
@@ -628,8 +1156,9 @@ public class GraphGenerator {
 		covers11.add("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6-mod");
 		covers11.add("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e-mod");
 		covers11.add("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62-mod");
-		coverageMap.put("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889", covers11);
-		
+		// JavaRDD<String> rdd11 = jsc.parallelize(covers11);
+		coverageMap.put("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889-mod", covers11);
+
 		ArrayList<String> covers12 = new ArrayList<>();
 		covers12.add("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc-mod");
 		covers12.add("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512-mod");
@@ -637,8 +1166,9 @@ public class GraphGenerator {
 		covers12.add("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059-mod");
 		covers12.add("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566-mod");
 		covers12.add("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a-mod");
-		coverageMap.put("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f", covers12);
-		
+		// JavaRDD<String> rdd12 = jsc.parallelize(covers12);
+		coverageMap.put("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f-mod", covers12);
+
 		ArrayList<String> covers13 = new ArrayList<>();
 		covers13.add("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod");
 		covers13.add("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823-mod");
@@ -654,8 +1184,9 @@ public class GraphGenerator {
 		covers13.add("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3-mod");
 		covers13.add("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd-mod");
 		covers13.add("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e-mod");
-		coverageMap.put("urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea", covers13);
-		
+		// JavaRDD<String> rdd13 = jsc.parallelize(covers13);
+		coverageMap.put("urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea-mod", covers13);
+
 		ArrayList<String> covers14 = new ArrayList<>();
 		covers14.add("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823-mod");
 		covers14.add("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386-mod");
@@ -663,8 +1194,9 @@ public class GraphGenerator {
 		covers14.add("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7-mod");
 		covers14.add("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68-mod");
 		covers14.add("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a-mod");
-		coverageMap.put("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e", covers14);
-		
+		// JavaRDD<String> rdd14 = jsc.parallelize(covers14);
+		coverageMap.put("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e-mod", covers14);
+
 		ArrayList<String> covers15 = new ArrayList<>();
 		covers15.add("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51-mod");
 		covers15.add("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe-mod");
@@ -672,295 +1204,8 @@ public class GraphGenerator {
 		covers15.add("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3-mod");
 		covers15.add("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd-mod");
 		covers15.add("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e-mod");
-		coverageMap.put("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab", covers15);
-		if (coverageMap.get(mod) != null) {
-			return coverageMap.get(mod);
-		}
-		return null;
-	}
-	 
-		// returns all covered mods for specified mod
-	 static JavaRDD<String> getCoverage(String mod, JavaSparkContext jsc) {
-		HashMap<String, JavaRDD<String>> coverageMap = new HashMap<String, JavaRDD<String>>();
-		ArrayList<String> covers = new ArrayList<>();
-		covers.add("urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a");
-		covers.add("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a");
-		covers.add("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883");
-		covers.add("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357");
-		covers.add("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86");
-		covers.add("urn:uuid:841014a7-ff74-4b40-8b3f-a9b083e1339d");
-		covers.add("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1");
-		covers.add("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4");
-		covers.add("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957");
-		covers.add("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4");
-		covers.add("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787");
-		covers.add("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176");
-		covers.add("urn:uuid:f94f180d-f09a-4a8e-b1c4-a75d48d56949");
-		covers.add("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d");
-		covers.add("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f");
-		covers.add("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552");
-		covers.add("urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49");
-		covers.add("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d");
-		covers.add("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678");
-		covers.add("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556");
-		covers.add("urn:uuid:0384c6cf-e18c-426c-b707-0fa44383a2a3");
-		covers.add("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc");
-		covers.add("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b");
-		covers.add("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f");
-		covers.add("urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d");
-		covers.add("urn:uuid:f051dba7-93df-429b-a730-f34d4ea1b522");
-		covers.add("urn:uuid:8f7314f1-b7b6-434c-a8ac-b161809a66fe");
-		covers.add("urn:uuid:8ab12162-5a0c-4223-a5a7-83b2aecd824d");
-		covers.add("urn:uuid:c21e3593-f034-47ce-8cd5-6de6688001a3");
-		covers.add("urn:uuid:2e936993-75e9-43f6-b272-137e535d1210");
-		covers.add("urn:uuid:4f4b5d37-8742-4d58-86fc-f7465328e8a8");
-		covers.add("urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a");
-		covers.add("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365");
-		covers.add("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889");
-		covers.add("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29");
-		covers.add("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a");
-		covers.add("urn:uuid:b51f0edd-d182-4bc0-adc6-6a1813fb8a1e");
-		covers.add("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6");
-		covers.add("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e");
-		covers.add("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62");
-		covers.add("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f");
-		covers.add("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc");
-		covers.add("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512");
-		covers.add("urn:uuid:425a08e3-7def-4a14-b68c-fbca41ad1dfb");
-		covers.add("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059");
-		covers.add("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566");
-		covers.add("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a");
-		covers.add("urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea");
-		covers.add("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e");
-		covers.add("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823");
-		covers.add("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386");
-		covers.add("urn:uuid:b9bd92c1-bab6-495a-9b07-cf887c2ba971");
-		covers.add("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7");
-		covers.add("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68");
-		covers.add("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a");
-		covers.add("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab");
-		covers.add("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51");
-		covers.add("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe");
-		covers.add("urn:uuid:8bc6bdeb-f30b-4f24-9f2c-8045135dc5f4");
-		covers.add("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3");
-		covers.add("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd");
-		covers.add("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e");
-		JavaRDD<String> rdd = jsc.parallelize(covers);
-		coverageMap.put("urn:uuid:c17f306c-3ca3-4bc0-a896-6c3702c539fb", rdd);
-		ArrayList<String> covers2 = new ArrayList<>();
-		covers2.add("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a");
-		covers2.add("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883");
-		covers2.add("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357");
-		covers2.add("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86");
-		covers2.add("urn:uuid:841014a7-ff74-4b40-8b3f-a9b083e1339d");
-		covers2.add("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1");
-		covers2.add("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4");
-		covers2.add("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957");
-		covers2.add("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4");
-		covers2.add("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787");
-		covers2.add("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176");
-		covers2.add("urn:uuid:f94f180d-f09a-4a8e-b1c4-a75d48d56949");
-		covers2.add("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d");
-		covers2.add("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f");
-		covers2.add("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552");
-		covers2.add("urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49");
-		covers2.add("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d");
-		covers2.add("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678");
-		covers2.add("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556");
-		covers2.add("urn:uuid:0384c6cf-e18c-426c-b707-0fa44383a2a3");
-		covers2.add("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc");
-		covers2.add("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b");
-		covers2.add("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f");
-		covers2.add("urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d");
-		covers2.add("urn:uuid:f051dba7-93df-429b-a730-f34d4ea1b522");
-		covers2.add("urn:uuid:8f7314f1-b7b6-434c-a8ac-b161809a66fe");
-		covers2.add("urn:uuid:8ab12162-5a0c-4223-a5a7-83b2aecd824d");
-		covers2.add("urn:uuid:c21e3593-f034-47ce-8cd5-6de6688001a3");
-		covers2.add("urn:uuid:2e936993-75e9-43f6-b272-137e535d1210");
-		covers2.add("urn:uuid:4f4b5d37-8742-4d58-86fc-f7465328e8a8");
-		JavaRDD<String> rdd2 = jsc.parallelize(covers2);
-		coverageMap.put("urn:uuid:77c42733-aea4-4f1c-93a1-3e02eea5548a", rdd2);
-		ArrayList<String> covers3 = new ArrayList<>();
-		covers3.add("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883");
-		covers3.add("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357");
-		covers3.add("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86");
-		covers3.add("urn:uuid:841014a7-ff74-4b40-8b3f-a9b083e1339d");
-		covers3.add("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1");
-		covers3.add("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4");
-		covers3.add("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957");
-		covers3.add("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4");
-		covers3.add("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787");
-		covers3.add("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176");
-		covers3.add("urn:uuid:f94f180d-f09a-4a8e-b1c4-a75d48d56949");
-		covers3.add("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d");
-		covers3.add("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f");
-		covers3.add("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552");
-		JavaRDD<String> rdd3 = jsc.parallelize(covers3);
-		coverageMap.put("urn:uuid:4c239bc4-cc63-46ec-91e2-31375dac798a", rdd3);
-		ArrayList<String> covers4 = new ArrayList<>();
-		covers4.add("urn:uuid:566d4bf1-3d64-4582-b591-631143a69357");
-		covers4.add("urn:uuid:cca945a9-1aa3-41ef-86ba-72074cc46b86");
-		covers4.add("urn:uuid:841014a7-ff74-4b40-8b3f-a9b083e1339d");
-		covers4.add("urn:uuid:fb79b9b5-8258-4282-a25d-9e4e272fcab1");
-		covers4.add("urn:uuid:6bac6d27-c54e-403e-94f7-ab7437d0aac4");
-		covers4.add("urn:uuid:17af4a37-9312-4f14-8e5f-321ebacb7957");
-		JavaRDD<String> rdd4 = jsc.parallelize(covers4);
-		coverageMap.put("urn:uuid:6de0c3d2-ec19-41d4-9f12-d22b7eda4883", rdd4);
-		
-		ArrayList<String> covers5 = new ArrayList<>();
-		covers5.add("urn:uuid:c670034d-1b3c-4fd2-8879-ca293f525787");
-		covers5.add("urn:uuid:687c09d1-114f-4f59-8798-84f63ab27176");
-		covers5.add("urn:uuid:f94f180d-f09a-4a8e-b1c4-a75d48d56949");
-		covers5.add("urn:uuid:a846e25f-8c07-475c-8ab6-5fba4c6a366d");
-		covers5.add("urn:uuid:5d77f31f-6ffc-49d9-a940-e4cd6b0ba19f");
-		covers5.add("urn:uuid:675b1e11-06c0-4c6b-8083-075089853552");
-		JavaRDD<String> rdd5 = jsc.parallelize(covers5);
-		coverageMap.put("urn:uuid:d3ae5ab1-e998-48b5-b6d5-81e5662368f4", rdd5);
-		
-		ArrayList<String> covers6 = new ArrayList<>();
-		covers6.add("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d");
-		covers6.add("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678");
-		covers6.add("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556");
-		covers6.add("urn:uuid:0384c6cf-e18c-426c-b707-0fa44383a2a3");
-		covers6.add("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc");
-		covers6.add("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b");
-		covers6.add("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f");
-
-		JavaRDD<String> rdd6 = jsc.parallelize(covers6);
-		coverageMap.put("urn:uuid:39314f3d-3975-42f4-9c15-f5cef8493f49", rdd6);
-		
-		
-		ArrayList<String> covers7 = new ArrayList<>();
-		covers7.add("urn:uuid:50ad2e1a-40c6-41f5-ba7c-df134f75c678");
-		covers7.add("urn:uuid:0acc4b38-168d-4a33-898c-258b89881556");
-		covers7.add("urn:uuid:0384c6cf-e18c-426c-b707-0fa44383a2a3");
-		covers7.add("urn:uuid:d631c578-a4bb-4416-87c6-f44c929f03fc");
-		covers7.add("urn:uuid:8378d3c2-575d-4cb8-874b-eb4ae286d61b");
-		covers7.add("urn:uuid:3afbf060-1a39-495d-8a16-24d4f0aa983f");
-		JavaRDD<String> rdd7 = jsc.parallelize(covers7);
-		coverageMap.put("urn:uuid:2c95e204-26ea-43ec-a997-774b5dc41c6d", rdd7);
-		
-		ArrayList<String> covers8 = new ArrayList<>();
-		covers7.add("urn:uuid:f051dba7-93df-429b-a730-f34d4ea1b522");
-		covers7.add("urn:uuid:8f7314f1-b7b6-434c-a8ac-b161809a66fe");
-		covers7.add("urn:uuid:8ab12162-5a0c-4223-a5a7-83b2aecd824d");
-		covers7.add("urn:uuid:c21e3593-f034-47ce-8cd5-6de6688001a3");
-		covers7.add("urn:uuid:2e936993-75e9-43f6-b272-137e535d1210");
-		covers7.add("urn:uuid:4f4b5d37-8742-4d58-86fc-f7465328e8a8");
-		JavaRDD<String> rdd8 = jsc.parallelize(covers8);
-		coverageMap.put("urn:uuid:faef9e3f-5a2f-4cf7-87d2-ffb9c89ce54d", rdd8);		
-		
-		
-		ArrayList<String> covers9 = new ArrayList<>();
-		covers9.add("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365");
-		covers9.add("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889");
-		covers9.add("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29");
-		covers9.add("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a");
-		covers9.add("urn:uuid:b51f0edd-d182-4bc0-adc6-6a1813fb8a1e");
-		covers9.add("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6");
-		covers9.add("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e");
-		covers9.add("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62");
-		covers9.add("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f");
-		covers9.add("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc");
-		covers9.add("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512");
-		covers9.add("urn:uuid:425a08e3-7def-4a14-b68c-fbca41ad1dfb");
-		covers9.add("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059");
-		covers9.add("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566");
-		covers9.add("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a");
-		covers9.add("urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea");
-		covers9.add("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e");
-		covers9.add("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823");
-		covers9.add("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386");
-		covers9.add("urn:uuid:b9bd92c1-bab6-495a-9b07-cf887c2ba971");
-		covers9.add("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7");
-		covers9.add("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68");
-		covers9.add("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a");
-		covers9.add("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab");
-		covers9.add("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51");
-		covers9.add("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe");
-		covers9.add("urn:uuid:8bc6bdeb-f30b-4f24-9f2c-8045135dc5f4");
-		covers9.add("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3");
-		covers9.add("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd");
-		covers9.add("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e");
-		JavaRDD<String> rdd9 = jsc.parallelize(covers9);
-		coverageMap.put("urn:uuid:ef8b5795-53c9-4908-ad9b-3be517b1717a", rdd9);
-		
-		
-		ArrayList<String> covers10 = new ArrayList<>();
-		covers10.add("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889");
-		covers10.add("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29");
-		covers10.add("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a");
-		covers10.add("urn:uuid:b51f0edd-d182-4bc0-adc6-6a1813fb8a1e");
-		covers10.add("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6");
-		covers10.add("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e");
-		covers10.add("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62");
-		covers10.add("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f");
-		covers10.add("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc");
-		covers10.add("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512");
-		covers10.add("urn:uuid:425a08e3-7def-4a14-b68c-fbca41ad1dfb");
-		covers10.add("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059");
-		covers10.add("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566");
-		covers10.add("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a");
-		JavaRDD<String> rdd10 = jsc.parallelize(covers10);
-		coverageMap.put("urn:uuid:269d3f53-2caf-4b4c-ace8-cd0fdf072365", rdd10);
-		
-		ArrayList<String> covers11 = new ArrayList<>();
-		covers11.add("urn:uuid:a62edf44-13e3-481e-a96d-831b9a1c4d29");
-		covers11.add("urn:uuid:47e6ea7c-b953-4cf9-9c75-0eb5e5b1ca4a");
-		covers11.add("urn:uuid:b51f0edd-d182-4bc0-adc6-6a1813fb8a1e");
-		covers11.add("urn:uuid:1de8b2e6-371c-4b30-aa30-1f4437105bf6");
-		covers11.add("urn:uuid:a92dbc19-69eb-4bac-ac38-e397b638779e");
-		covers11.add("urn:uuid:9984f36a-c2c0-41ec-9c73-dab819efab62");
-		JavaRDD<String> rdd11 = jsc.parallelize(covers11);
-		coverageMap.put("urn:uuid:5270afb5-8954-4734-a611-8e211ba58889", rdd11);
-		
-		ArrayList<String> covers12 = new ArrayList<>();
-		covers12.add("urn:uuid:4e12cad7-89ce-492e-8f81-f702c4b06adc");
-		covers12.add("urn:uuid:bbd95ab5-0d2b-4d59-8bd8-466aaaa42512");
-		covers12.add("urn:uuid:425a08e3-7def-4a14-b68c-fbca41ad1dfb");
-		covers12.add("urn:uuid:7e80979b-9003-4efe-8fce-fb97bd779059");
-		covers12.add("urn:uuid:af10333e-524e-49aa-8c6d-35c2bf0ce566");
-		covers12.add("urn:uuid:89264326-108f-46da-a504-cf62475b0f7a");
-		JavaRDD<String> rdd12 = jsc.parallelize(covers12);
-		coverageMap.put("urn:uuid:da1806d4-2cca-49e5-b94d-97acbfc4377f", rdd12);
-		
-		ArrayList<String> covers13 = new ArrayList<>();
-		covers13.add("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e");
-		covers13.add("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823");
-		covers13.add("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386");
-		covers13.add("urn:uuid:b9bd92c1-bab6-495a-9b07-cf887c2ba971");
-		covers13.add("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7");
-		covers13.add("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68");
-		covers13.add("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a");
-		covers13.add("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab");
-		covers13.add("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51");
-		covers13.add("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe");
-		covers13.add("urn:uuid:8bc6bdeb-f30b-4f24-9f2c-8045135dc5f4");
-		covers13.add("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3");
-		covers13.add("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd");
-		covers13.add("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e");
-		JavaRDD<String> rdd13 = jsc.parallelize(covers13);
-		coverageMap.put("urn:uuid:e023f29a-06ff-4cec-9bb6-1a496c6025ea", rdd13);
-		
-		ArrayList<String> covers14 = new ArrayList<>();
-		covers14.add("urn:uuid:4dec2c1c-e428-4041-a4e0-c271c7e97823");
-		covers14.add("urn:uuid:03d427b2-6dfd-4eaa-9516-502d2e8eb386");
-		covers14.add("urn:uuid:b9bd92c1-bab6-495a-9b07-cf887c2ba971");
-		covers14.add("urn:uuid:d0c0888a-851f-4a80-b297-2d36492912c7");
-		covers14.add("urn:uuid:b8393cc4-5d7b-41bc-b129-ee8720c7fc68");
-		covers14.add("urn:uuid:645aa795-c1df-4584-833a-b0211f7a5b5a");
-		JavaRDD<String> rdd14 = jsc.parallelize(covers14);
-		coverageMap.put("urn:uuid:f933c945-ac36-47c3-99e2-56d63095e07e", rdd14);
-		
-		ArrayList<String> covers15 = new ArrayList<>();
-		covers15.add("urn:uuid:6f7cb308-26a3-4cb6-876f-742adff08a51");
-		covers15.add("urn:uuid:0daef85b-6431-475b-b80b-1eab7c2f54fe");
-		covers15.add("urn:uuid:8bc6bdeb-f30b-4f24-9f2c-8045135dc5f4");
-		covers15.add("urn:uuid:ec9a63db-45e4-4a69-afd2-6d5e7478afd3");
-		covers15.add("urn:uuid:e3896eeb-e862-499d-a03a-9599854087bd");
-		covers15.add("urn:uuid:c2da0d6a-7c8b-4202-87e7-058a83dfbc0e");
-		JavaRDD<String> rdd15 = jsc.parallelize(covers14);
-		coverageMap.put("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab", rdd15);
+		// JavaRDD<String> rdd15 = jsc.parallelize(covers14);
+		coverageMap.put("urn:uuid:8a99a96b-1adf-404f-8f61-ff5edf0c52ab-mod", covers15);
 		if (coverageMap.get(mod) != null) {
 			return coverageMap.get(mod);
 		}
