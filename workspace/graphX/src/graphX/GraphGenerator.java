@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.hadoop.util.Time;
 import org.apache.jena.riot.Lang;
 import org.apache.jena.riot.RDFDataMgr;
 import org.apache.jena.sparql.core.Quad;
@@ -38,7 +39,6 @@ public class GraphGenerator {
 						else {return new Resource(x.getObject().toString());}
 						}))
 				.map(x -> new Tuple2<Object, Object>(UUID.nameUUIDFromBytes(x.toString().getBytes()).getMostSignificantBits(), x));
-
 		// all Objects that are Literals
 		JavaRDD<Edge<Relation>> edges = 
 				javaRDD.map(x -> {
@@ -57,7 +57,7 @@ public class GraphGenerator {
 										new Relation(new Resource(x.getPredicate().toString()), new Resource(x.getGraph().toString()),
 												"Resource")); }		
 					});
-				
+
 //				javaRDD.filter(x -> x.getObject().isLiteral())
 //				.map(x -> new Edge<Relation>(
 //						UUID.nameUUIDFromBytes(x.getSubject().toString().getBytes()).getMostSignificantBits(),
@@ -85,7 +85,7 @@ public class GraphGenerator {
 	// get JavaRDD from n-quad file
 	private static JavaRDD<Quad> getJavaRDD(String path, String fileName, JavaSparkContext jsc) {
 
-		JavaRDD<Quad> javaRDD = jsc.textFile(path + "\\" + fileName).filter(line -> !line.startsWith("#"))
+		JavaRDD<Quad> javaRDD = jsc.textFile(path + fileName).filter(line -> !line.startsWith("#"))
 				.filter(line -> !line.isEmpty() || line.length() != 0).map(line -> RDFDataMgr
 						.createIteratorQuads(new ByteArrayInputStream(line.getBytes()), Lang.NQUADS, null).next());
 		javaRDD.persist(StorageLevel.MEMORY_AND_DISK());
