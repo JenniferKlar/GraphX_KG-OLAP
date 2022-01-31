@@ -43,6 +43,7 @@ public class GraphGenerator2 {
 		jsc.setLogLevel("ERROR");
 		String fileName = "1feeb89f-3103-447d-a2aa-890e94e4ab18.nq";
 		Graph<Object, Relation> graph = GraphGenerator2.generateGraph(jsc, objectTag, relationTag, path, fileName);
+		graph.partitionBy(null);
 		graph.edges().saveAsObjectFile(path + "edges_noType" + fileName);
 		graph.vertices().saveAsObjectFile(path + "vertices_noType" + fileName);
 		
