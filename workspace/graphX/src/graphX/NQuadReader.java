@@ -194,8 +194,8 @@ public class NQuadReader {
 				.map(x -> new Tuple5<Object, Object, Object, Object, Object>(x._1(), x._2(),
 						getIdOfObject(((Resource) x._3()).getValue()), (Resource) x._3(), x._4()));
 		
-		JavaRDD<Tuple2<Object, Object>> newVertices = statementTuple4
-				.map(x -> new Tuple2<Object, Object>(getIdOfObject(((Resource) x._3()).getValue()), (Resource) x._3()));
+		JavaRDD<Tuple2<Object, Object>> newVertices = statementTuple5
+				.map(x -> new Tuple2<Object, Object>(x._3(), x._4()));
 
 		// subject Edges
 		JavaRDD<Edge<Relation>> subjectEdges = statementTuple5
@@ -437,8 +437,8 @@ public class NQuadReader {
 				.map(x -> new Tuple5<Object, Object, Object, Object, Object>(x._1(), x._2(),
 						getIdOfObject(((Resource) x._3()).getValue()), (Resource) x._3(), x._4()));
 		
-		JavaRDD<Tuple2<Object, Object>> newVertices = statementTuple4
-				.map(x -> new Tuple2<Object, Object>(getIdOfObject(((Resource) x._3()).getValue()), (Resource) x._3()));
+		JavaRDD<Tuple2<Object, Object>> newVertices = statementTuple5
+				.map(x -> new Tuple2<Object, Object>(x._3(), x._4()));
 
 		// subject Edges
 		JavaRDD<Edge<Relation>> subjectEdges = statementTuple5

@@ -33,9 +33,10 @@ public class GraphGenerator {
 		
 		JavaSparkContext jsc = new JavaSparkContext(sparkConf);
 		jsc.setLogLevel("ERROR");
-		String fileName = "1feeb89f-3103-447d-a2aa-890e94e4ab18.nq";
+		
+		String fileName = "bd108186-5adb-4f00-b5fe-b24a8993560b.nq";
 		Graph<Object, Relation> graph = GraphGenerator.generateGraph(jsc, objectTag, relationTag, path, fileName);
-		graph.partitionBy(null);
+
 		graph.edges().saveAsObjectFile(path + "edges_noType" + fileName);
 		graph.vertices().saveAsObjectFile(path + "vertices_noType" + fileName);
 		
@@ -107,6 +108,7 @@ public class GraphGenerator {
 		JavaRDD<Quad> javaRDD = jsc.textFile(path + fileName).filter(line -> !line.startsWith("#"))
 				.filter(line -> !line.isEmpty() || line.length() != 0).map(line -> RDFDataMgr
 						.createIteratorQuads(new ByteArrayInputStream(line.getBytes()), Lang.NQUADS, null).next());
+		
 		javaRDD.persist(StorageLevel.MEMORY_ONLY());
 		return javaRDD;
 	}
