@@ -1,6 +1,5 @@
 # **NQuadReader**
 	todo:
-	Illustrations are not added yet
 	go through wording again	
 	adding examples (RDF statements and mapping outputs and so on)
 
@@ -39,6 +38,10 @@ At the moment for all illustrations in this document the following note has to b
 
 **Reification – method “reify”**
 
+
+![Reification](Reification.png)
+
+
  - This method basically performs reification on RDF statements that
    contains a certain predicate
    
@@ -72,6 +75,10 @@ the steps in the code are therefore as follows:
 
 **Pivot**
 
+
+![Pivot](Pivot.png)
+
+
 the steps in the code are therefore as follows:
 
  - Filter all the triplets of the graph that contain the
@@ -95,6 +102,13 @@ the steps in the code are therefore as follows:
 
 **aggregatePropertyValues (value-generating abstraction)**
 
+
+![aggregatePropertyValue_after_groupByProperty](aggregatePropertyValue_after_groupByProperty.png)
+
+
+![aggregatePropertyValue_after_replcaeByGrouping](aggregatePropertyValue_after_replcaeByGrouping.png)
+
+
 the steps in the code are as follows:
 
  - Filter all the triplets that contain the aggregateProperty as predicate and map them to a pairRDD (a tuple) that contains:
@@ -109,6 +123,10 @@ The next steps are dependent on the type of aggregation that should be performed
 
 **Group by property (individual generating abstraction**
 
+
+![GroupByProperty](GroupByProperty.png)
+
+
 the steps in the code are as follows:
 
  - Filter all triplets that contain the groupingProperty as predicate (the destination individual is the object by which the subjects of the triplets should later be grouped
@@ -119,6 +137,10 @@ the steps in the code are as follows:
  - Created a new graph from the new edges and old and new vertices
 
 **Replace by Grouping (triple generating abstraction)**
+
+
+![ReplaceByGrouping](ReplaceByGrouping.png)
+
 
 the steps in the code are as follows:
 
