@@ -148,45 +148,74 @@ the steps in the code are as follows:
 
 # **GraphGenerator**
 
-The Graph Generator class is basically there to create a new initial base Graph directly from the data source. It therefore in my case takes an NQ-File and analyses each row. It creates GraphX Vertices from all the subjects and objects in the RDF statements, then it created Edges using the created Vertices and assigning the RDF-predicate as the value of the GraphX Edge. Also the Graphname within the RDF statements is also stored in the Edge as an additional Attribute.
+The Graph Generator class is basically there to create a new initial base Graph directly from the data source. It therefore in this case takes an NQuad-File and analyses each row. It creates GraphX Vertices from all the subjects and objects in the RDF statements, then it created Edges using the created Vertices and assigning the RDF-predicate as the attribute value of the GraphX Edge. Also the Graphname within the RDF statements is stored in the Edge as an additional attribute.
 
-It is important to note that in general every RDF statement is translated into one GraphX Edge. However all RDF statements that describe a type-relation (predicate = [http://www.w3.org/1999/02/22-rdf-syntax-ns#type](http://www.w3.org/1999/02/22-rdf-syntax-ns#type) is not stored as an Edge but the type property is directly stored with the subject-Vertex.
+It is important to note that in general every RDF statement is translated into one GraphX Edge. However all RDF statements that describe a type-relation (predicate = [http://www.w3.org/1999/02/22-rdf-syntax-ns#type](http://www.w3.org/1999/02/22-rdf-syntax-ns#type) is not stored as an Edge but the type property is directly stored with the subject-Vertex as additional attribute.
 
 **getJavaRDD**
 
-This method loads a nquad-File and reads every line of it and creates a quadriple (class quad) for each valid line (not empty, not a comment, length >1) and stores it in a JavaRDD< Quad > which is then returned
+This method loads a NQuad-File and reads every line of it and creates a quadriple (Java class Quad) for each valid line (tha is not empty, not a comment and has length >1) and stores it in a JavaRDD< Quad > which is then returned by the method.
 
 **generateGraph**
 
- - the generateGraph method first uses the getJavaRDD method to generate the JavaRDD of quads.
- - Then all statements are are searched that do not contain the type-relation as predicate.
- - All subjects of such statements are mapped to a new Vertex (of type Resource since there can only be Resources and no Literals in the subject of a RDF statement)
- - All objects are also mapped to a Vertex but it is first checked whether it is a literal (then the literal value is used as the Vertex attribute) or if it is also a resource (then the whole resource – the uri – is used as the Vertex attribute)
- - Then all statements with the type-relation are searched and mapped to
-   new tuples with ID and the Vertex itself which is constructed by the
-   subject itself and also the object of the type-relationship statement
+ - the generateGraph method first uses the getJavaRDD method to generate the JavaRDD of Quads.
+ - Then all RDF statements are filtered that do not contain the type-relation as predicate.
+ - All subjects of such statements are mapped to a new Vertex (of type "Resource" since there can only be resources and no literals in the subject of a RDF statement)
+ - All objects are also mapped to a Vertex but it is first checked whether it is a literal (then the literal value is used as the Vertex attribute) or if it is also a resource (then the URI of the object is used as the Vertex attribute)
+ - Then all statements with the type-relation are filtered and mapped to
+   new Tuples with an ID and the Vertex itself which again contains the
+   subject URI itself and also the object of the type-relationship statement
    
- - Then the Vertices without a type are used and the Vertices with a type are "substracted" (removed) from them since we want to use the ones that have the type as an attribute rather than the ones that do not have this information
- -  then the rest of the Vertices without a type that stayed after the substraction are combined with the Vertices that have a type
- -  those are then mapped to new tuple2 of type < Object, Object> since otherwise GraphX does not allow graph generation
+ - Then the Vertices without a type are taken and all found Vertices already having a type are "substracted" (removed) from them (if they exists in both RDDs: once with a tye and once without a type) since we want to use the ones that have the type as an attribute rather than the ones that do not have this information
+ -  then the rest of the Vertices without a type that stayed after the substraction are combined with the Vertices that do have a type
+ -  those are then mapped to a new Tuple2 of type < Object, Object> since otherwise GraphX does not allow graph generation
  - then the graph is generated out of the Edges and Vertices and returned
-   
+ 
+The following example should should show in a simple way how the generation of the Vertices (and their assigned type values) is done:
+ 
+ Base Data Example:
+ 
+ < A > < type > < x >
+ < A > < hasParent > < B >
+ < A > < hasChild > < C >
+ < B > < hasParent > < D >
+ < D> < hasAge > < 5 >
+ 
+ filtering of the statements that without a type-predicate
+ < A > < hasParent > < B >
+ < A > < hasChild > < C >
+ < B > < hasParent > < D >
+ < D > < hasAge > < 5 >
+ 
+ subjects are mapped (distinct) to new Resource Vertices -> A, B, D
+ objects are either mapped to Resource Vertex or literal -> C = resource, D = resource, 5 = Literal
+ 
+ statements with type-predicate are filtered and mapped to Vertex with type attribute
+  < A > < type > < x > -> Vertex -> A(type x)
 
+Vertices without a type are subtracted from Vertices with a type
+[A(no type), B(no type), C(no type)] MINUS [A(type x)] = [B(no type), C(no type)]
+
+Vertices that stay after the subtraction are combined with Vertices with a type
+[B(no type), C(no type)] + [A(type x)] = [B(no type), C(no type), A(type x]
+ 
+ 
+   
 **Relation**
 
- - Edges are of the Type “Relation”. The relation class represents the
-   relation between two Vertices  - or rather the attributes of the
+ - Edges are of the Type “Relation”. The Relation class represents the
+   relation between two Vertices  - or rather the attributes of the GraphX
    Edge. The attributes that are used are:
 	
 	 - The “relationship” which is basically the predicate of the original
    RDF statement
    
-	 - The “Context” which is the URI of the named graph the relation
+	 - The “Context” which is the name of the named graph the relation
    belongs to
   
 	 - The “targedatatype” which stores either the type of the literal   
-   (Integer, String, Boolean,..) of the object of a RDF statement or the
-   String “Resource” when it’s not a literal but a resource (URI) so   
+   (Integer, String, Boolean,..) of the object of a RDF statement (or the destination Vertex of the EdgeTriplet) or the
+   String “Resource” when it is not a literal but a resource (URI) so   
    that when aggregating for example it could be made sure that only   
    integer values are summed up and so on (this was an idea at the   
    beginning however it is not really used at the moment but I guess it 
